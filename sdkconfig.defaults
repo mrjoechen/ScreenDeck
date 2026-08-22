@@ -1,0 +1,57 @@
+# Keep the existing Arduino application APIs while ESP-IDF owns the build,
+# display driver, RGB DMA, touch controller and LVGL integration.
+CONFIG_AUTOSTART_ARDUINO=y
+CONFIG_FREERTOS_HZ=1000
+CONFIG_MBEDTLS_CERTIFICATE_BUNDLE=y
+
+# ESP32-S3 OPI PSRAM and RGB scanout performance baseline recommended by the
+# Espressif LVGL adapter. Hybrid PlatformIO builds need these settings here;
+# the generic DevKit board metadata does not describe this panel's 8 MB PSRAM.
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_TYPE_AUTO=y
+CONFIG_SPIRAM_SPEED_80M=y
+CONFIG_SPIRAM_BOOT_INIT=y
+CONFIG_SPIRAM_USE_MALLOC=y
+CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=4096
+CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL=32768
+CONFIG_SPIRAM_XIP_FROM_PSRAM=y
+CONFIG_ESP32S3_INSTRUCTION_CACHE_32KB=y
+CONFIG_ESP32S3_DATA_CACHE_64KB=y
+CONFIG_ESP32S3_DATA_CACHE_LINE_64B=y
+CONFIG_COMPILER_OPTIMIZATION_PERF=y
+
+# LVGL is an ESP-IDF managed component now, so its Kconfig replaces the old
+# Arduino-only lv_conf.h. Large decoder allocations flow to PSRAM through the
+# system allocator while small, latency-sensitive UI objects stay internal.
+CONFIG_LV_MEM_CUSTOM=y
+CONFIG_LV_MEM_CUSTOM_INCLUDE="stdlib.h"
+CONFIG_LV_MEM_BUF_MAX_NUM=32
+CONFIG_LV_IMG_CACHE_DEF_SIZE=1
+CONFIG_LV_FONT_MONTSERRAT_16=y
+CONFIG_LV_FONT_MONTSERRAT_20=y
+CONFIG_LV_FONT_MONTSERRAT_24=y
+CONFIG_LV_FONT_MONTSERRAT_28=y
+CONFIG_LV_FONT_MONTSERRAT_32=y
+CONFIG_LV_FONT_MONTSERRAT_40=y
+CONFIG_LV_FONT_MONTSERRAT_48=y
+CONFIG_LV_FONT_SIMSUN_16_CJK=y
+CONFIG_LV_FONT_DEFAULT_MONTSERRAT_16=y
+CONFIG_LV_USE_PNG=y
+CONFIG_LV_USE_SJPG=y
+CONFIG_LV_USE_GIF=y
+CONFIG_LV_USE_QRCODE=y
+
+# Keep the RGB bounce-buffer interrupt runnable while the flash cache is
+# disabled. Without this, any LittleFS or NVS write starves the scanout, which
+# is why every settings commit used to blank the backlight to hide it.
+CONFIG_LCD_RGB_ISR_IRAM_SAFE=y
+
+# The TF card holds user media with ordinary long file names.
+CONFIG_FATFS_LFN_HEAP=y
+CONFIG_FATFS_MAX_LFN=255
+CONFIG_FATFS_API_ENCODING_UTF_8=y
+
+# Preserve the current 16 MB flash and application layout.
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+CONFIG_ESPTOOLPY_HEADER_FLASHSIZE_UPDATE=y

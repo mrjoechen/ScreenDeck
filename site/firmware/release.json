@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "channel": "development",
+  "version": "development",
+  "tag": null,
+  "builtAt": null,
+  "builtOn": null,
+  "factoryImage": "./screendeck-esp32s3-4848s040-factory.bin"
+}

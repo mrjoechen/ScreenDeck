@@ -1,0 +1,381 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <title>ScreenDeck layout regression</title>
+    <style>
+      iframe {
+        position: absolute;
+        top: 0;
+        left: -20000px;
+        height: 900px;
+        border: 0;
+        visibility: hidden;
+      }
+    </style>
+  </head>
+  <body data-status="running">
+    <pre id="results">布局测试运行中…</pre>
+    <script type="module">
+      const results = [];
+      const failures = [];
+
+      function assertLayout(name, condition, detail) {
+        const passed = Boolean(condition);
+        results.push(`${passed ? "PASS" : "FAIL"} · ${name}${detail ? ` · ${detail}` : ""}`);
+        if (!passed) failures.push(name);
+      }
+
+      function waitForLoad(frame) {
+        return new Promise((resolve, reject) => {
+          const timeout = window.setTimeout(() => reject(new Error("页面加载超时")), 8000);
+          frame.addEventListener("load", () => {
+            window.clearTimeout(timeout);
+            resolve();
+          }, { once: true });
+        });
+      }
+
+      async function capture(width) {
+        const frame = document.createElement("iframe");
+        frame.width = String(width);
+        frame.src = `./index.html?layout-test=${width}`;
+        document.body.append(frame);
+        await waitForLoad(frame);
+
+        const view = frame.contentWindow;
+        const page = frame.contentDocument;
+        await Promise.race([
+          page.fonts?.ready ?? Promise.resolve(),
+          new Promise((resolve) => window.setTimeout(resolve, 1200)),
+        ]);
+        for (let attempt = 0; attempt < 80; attempt += 1) {
+          if (page.querySelector("#registryState[data-state='ready'], #registryState[data-state='error']")) break;
+          await new Promise((resolve) => window.setTimeout(resolve, 25));
+        }
+        await new Promise((resolve) => view.requestAnimationFrame(() => view.requestAnimationFrame(resolve)));
+
+        const box = (selector) => {
+          const node = page.querySelector(selector);
+          if (!node) throw new Error(`缺少布局节点：${selector}`);
+          return node.getBoundingClientRect();
+        };
+        const documentTop = (selector) => box(selector).top + view.scrollY;
+        const documentBottom = (selector) => box(selector).bottom + view.scrollY;
+        const heroNode = page.querySelector(".hero");
+        const heroCopyNode = page.querySelector(".hero__copy");
+        const heroProofNode = page.querySelector(".hero__proof");
+        const workflowNode = page.querySelector(".workflow-section");
+        const featureSectionNode = page.querySelector(".feature-section");
+        const featureGrid = page.querySelector(".feature-matrix");
+        const featureCards = [...page.querySelectorAll(".feature")].map((node) => node.getBoundingClientRect());
+        const featureHeader = page.querySelector(".feature-section > .section-head");
+        const hardwareHeader = page.querySelector(".hardware-section > .section-head");
+        const heroProofStyle = view.getComputedStyle(heroProofNode);
+        const colorIsOpaque = (color) => {
+          const canvas = page.createElement("canvas");
+          canvas.width = 1;
+          canvas.height = 1;
+          const context = canvas.getContext("2d");
+          context.clearRect(0, 0, 1, 1);
+          context.fillStyle = color;
+          context.fillRect(0, 0, 1, 1);
+          return context.getImageData(0, 0, 1, 1).data[3] === 255;
+        };
+
+        return {
+          frame,
+          width,
+          documentHeight: page.documentElement.scrollHeight,
+          overflow: page.documentElement.scrollWidth - page.documentElement.clientWidth,
+          hero: heroNode.getBoundingClientRect(),
+          heroCopy: heroCopyNode.getBoundingClientRect(),
+          heroProof: heroProofNode.getBoundingClientRect(),
+          heroProofStyle: {
+            backgroundColor: heroProofStyle.backgroundColor,
+            backgroundOpaque: colorIsOpaque(heroProofStyle.backgroundColor),
+            borderWidths: [
+              heroProofStyle.borderTopWidth,
+              heroProofStyle.borderRightWidth,
+              heroProofStyle.borderBottomWidth,
+              heroProofStyle.borderLeftWidth,
+            ],
+            borderStyles: [
+              heroProofStyle.borderTopStyle,
+              heroProofStyle.borderRightStyle,
+              heroProofStyle.borderBottomStyle,
+              heroProofStyle.borderLeftStyle,
+            ],
+            radius: heroProofStyle.borderTopLeftRadius,
+            padding: [
+              heroProofStyle.paddingTop,
+              heroProofStyle.paddingRight,
+              heroProofStyle.paddingBottom,
+              heroProofStyle.paddingLeft,
+            ],
+          },
+          workflowDirectlyPrecedesFeatures: workflowNode.nextElementSibling === featureSectionNode,
+          featureColumns: view.getComputedStyle(featureGrid).gridTemplateColumns.split(" ").length,
+          featureGrid: box(".feature-matrix"),
+          featureCards,
+          featureCopy: [...page.querySelectorAll(".feature")].map((node) => ({
+            signal: node.querySelector(".feature__signal")?.textContent.trim() ?? "",
+            title: node.querySelector("h3")?.textContent.trim() ?? "",
+            body: node.querySelector("p:not(.feature__signal)")?.textContent.trim() ?? "",
+            fact: node.querySelector(".feature__fact")?.textContent.trim() ?? "",
+          })),
+          offsetFeature: box(".feature--offset"),
+          featureHeader: featureHeader.getBoundingClientRect(),
+          featureHeaderContent: featureHeader.firstElementChild.getBoundingClientRect(),
+          hardwareHeader: hardwareHeader.getBoundingClientRect(),
+          hardwareHeaderContent: hardwareHeader.firstElementChild.getBoundingClientRect(),
+          hardwareFigure: box(".annotated-device"),
+          hardwareSpec: box(".hardware-spec"),
+          gaps: {
+            heroToInstall: documentTop(".install-section > .section-head") - documentBottom(".hero__baseline"),
+            workbenchToWorkflow: documentTop(".workflow-section > .section-head") - documentBottom(".workbench"),
+            workflowToFeatures: documentTop(".feature-section > .section-head") - documentBottom(".steps"),
+            featuresToHardware: documentTop(".hardware-section > .section-head") - documentBottom(".feature-matrix"),
+          },
+        };
+      }
+
+      async function captureDeviceDiagram() {
+        const response = await fetch("./assets/device.svg", { cache: "no-store" });
+        if (!response.ok) throw new Error(`device diagram HTTP ${response.status}`);
+
+        const source = await response.text();
+        const parsed = new DOMParser().parseFromString(source, "image/svg+xml");
+        if (parsed.querySelector("parsererror")) throw new Error("设备示意图不是有效 SVG");
+
+        const svg = document.importNode(parsed.documentElement, true);
+        svg.setAttribute("width", "1200");
+        svg.setAttribute("height", "900");
+        svg.style.cssText = "position:absolute;left:-20000px;top:0;visibility:hidden";
+        document.body.append(svg);
+        await new Promise((resolve) => requestAnimationFrame(resolve));
+
+        const node = (selector) => {
+          const element = svg.querySelector(selector);
+          if (!element) throw new Error(`缺少设备图节点：${selector}`);
+          return element;
+        };
+        const box = (selector) => node(selector).getBBox();
+        const labelRightEdges = (selector) =>
+          [...node(selector).querySelectorAll("text")].map((textNode) => {
+            const labelBox = textNode.getBBox();
+            return labelBox.x + labelBox.width;
+          });
+
+        const result = {
+          board: box("#board-outline"),
+          tfSlot: box("#tf-card-slot"),
+          usbPort: box("#usb-type-c-port"),
+          tfCallout: box("#tf-card-callout"),
+          usbCallout: box("#usb-type-c-callout"),
+          tfLabelRightEdges: labelRightEdges("#tf-card-callout"),
+          usbLabelRightEdges: labelRightEdges("#usb-type-c-callout"),
+          labels: [...svg.querySelectorAll("text")].map((item) => item.textContent.trim()),
+          description: node("desc").textContent.trim(),
+        };
+        svg.remove();
+        return result;
+      }
+
+      try {
+        const widths = [
+          320, 375, 414, 639, 640, 768, 895, 896, 959,
+          960, 991, 992, 1023, 1024, 1088, 1280, 1440,
+        ];
+        const captures = new Map(
+          await Promise.all(widths.map(async (width) => [width, await capture(width)])),
+        );
+        const diagram = await captureDeviceDiagram();
+        const boardRight = diagram.board.x + diagram.board.width;
+        const boardMiddle = diagram.board.y + diagram.board.height / 2;
+        const tfMiddle = diagram.tfSlot.y + diagram.tfSlot.height / 2;
+        const alignedRight = (edges) => Math.max(...edges) - Math.min(...edges) < 1;
+
+        assertLayout(
+          "TF 卡槽位于板体右侧中部",
+          Math.abs(diagram.tfSlot.x - boardRight) < 1 && Math.abs(tfMiddle - boardMiddle) < 8,
+          `板体右边 ${Math.round(boardRight)}，卡槽 x=${Math.round(diagram.tfSlot.x)}，中线差 ${Math.round(Math.abs(tfMiddle - boardMiddle))}px`,
+        );
+        assertLayout(
+          "USB Type-C 位于 TF 卡槽正下方",
+          Math.abs(diagram.usbPort.x - diagram.tfSlot.x) < 1 &&
+            diagram.usbPort.y >= diagram.tfSlot.y + diagram.tfSlot.height + 48,
+          `TF (${Math.round(diagram.tfSlot.x)}, ${Math.round(diagram.tfSlot.y)}) / USB (${Math.round(diagram.usbPort.x)}, ${Math.round(diagram.usbPort.y)})`,
+        );
+        assertLayout(
+          "TF 与 USB 标注共用右侧对齐线",
+          diagram.tfCallout.x >= boardRight &&
+            diagram.usbCallout.x >= boardRight &&
+            alignedRight(diagram.tfLabelRightEdges) &&
+            alignedRight(diagram.usbLabelRightEdges),
+          `TF 右边 ${diagram.tfLabelRightEdges.map(Math.round).join("/")}，USB 右边 ${diagram.usbLabelRightEdges.map(Math.round).join("/")}`,
+        );
+        assertLayout(
+          "接口名称和无障碍说明明确标注 USB Type-C",
+          diagram.labels.includes("USB TYPE-C") &&
+            diagram.description.includes("USB Type-C") &&
+            diagram.labels.includes("MEDIA / 03") &&
+            diagram.labels.includes("CONTROL / 05"),
+          "需要 USB Type-C、MEDIA / 03 与 CONTROL / 05",
+        );
+
+        const tablet = captures.get(768);
+        assertLayout(
+          "平板宽度下流畅切页卡片不留下空网格",
+          Math.abs(tablet.offsetFeature.left - tablet.featureGrid.left) < 1 &&
+            Math.abs(tablet.offsetFeature.width - tablet.featureGrid.width) < 1,
+          `卡片 ${Math.round(tablet.offsetFeature.width)}px / 网格 ${Math.round(tablet.featureGrid.width)}px`,
+        );
+        assertLayout(
+          "单内容 section 标题占满可用宽度",
+          Math.abs(tablet.featureHeaderContent.width - tablet.featureHeader.width) < 1 &&
+            Math.abs(tablet.hardwareHeaderContent.width - tablet.hardwareHeader.width) < 1,
+          `功能标题 ${Math.round(tablet.featureHeaderContent.width)}px / 容器 ${Math.round(tablet.featureHeader.width)}px`,
+        );
+
+        const desktop = captures.get(1280);
+        const mobile = captures.get(375);
+        const panelInsideHero = (capture) =>
+          capture.heroProof.top >= capture.hero.top - 1 &&
+          capture.heroProof.right <= capture.hero.right + 1 &&
+          capture.heroProof.bottom <= capture.hero.bottom + 1 &&
+          capture.heroProof.left >= capture.hero.left - 1;
+        assertLayout(
+          "设备信息面板使用不透明实色背景",
+          desktop.heroProofStyle.backgroundOpaque,
+          desktop.heroProofStyle.backgroundColor,
+        );
+        assertLayout(
+          "设备信息面板使用完整外框和统一圆角",
+          desktop.heroProofStyle.borderWidths.every((width) => width === "1px") &&
+            desktop.heroProofStyle.borderStyles.every((style) => style === "solid") &&
+            desktop.heroProofStyle.radius === "22px",
+          `${desktop.heroProofStyle.borderWidths.join("/")} · ${desktop.heroProofStyle.radius}`,
+        );
+        assertLayout(
+          "设备信息面板使用响应式四边内边距",
+          mobile.heroProofStyle.padding.every((value) => value === "24px") &&
+            tablet.heroProofStyle.padding.every((value) => value === "40px") &&
+            desktop.heroProofStyle.padding.every((value) => value === "40px"),
+          `375px=${mobile.heroProofStyle.padding.join("/")} · 768px=${tablet.heroProofStyle.padding.join("/")} · 1280px=${desktop.heroProofStyle.padding.join("/")}`,
+        );
+        assertLayout(
+          "设备信息面板在主要断点内保持于首屏边界",
+          [mobile, tablet, desktop].every(panelInsideHero),
+          `375/768/1280=${[mobile, tablet, desktop].map(panelInsideHero).join("/")}`,
+        );
+        const expectedFeatureTitles = [
+          "在局域网管理内容。",
+          "上传图片与 GIF。",
+          "直接播放 TF 卡内容。",
+          "切页更流畅。",
+          "调节显示与作息。",
+        ];
+        const actualFeatureTitles = desktop.featureCopy.map(({ title }) => title);
+        const featureCopyText = desktop.featureCopy
+          .flatMap(({ signal, title, body, fact }) => [signal, title, body, fact])
+          .join(" ");
+        assertLayout(
+          "五张功能卡用简短标题说明具体能力",
+          actualFeatureTitles.length === expectedFeatureTitles.length &&
+            actualFeatureTitles.every((title, index) => title === expectedFeatureTitles[index]),
+          actualFeatureTitles.join(" / "),
+        );
+        assertLayout(
+          "功能卡正文不再使用底层实现术语",
+          !["ESP-IDF", "PSRAM", "bounce buffer", "帧缓冲"]
+            .some((term) => featureCopyText.includes(term)),
+          "禁止 ESP-IDF、PSRAM、bounce buffer、帧缓冲",
+        );
+        const [, mediaCopy, tfCopy, playbackCopy] = desktop.featureCopy;
+        assertLayout(
+          "媒体与 TF 卡文案明确实际格式边界",
+          mediaCopy.body.includes("2 MB") &&
+            mediaCopy.body.includes("480 × 480") &&
+            tfCopy.body.includes(".jpg") &&
+            tfCopy.body.includes(".rgb565") &&
+            tfCopy.body.includes("无需复制"),
+          "GIF 需注明 2 MB / 480 × 480，TF 需注明 .jpg / .rgb565 / 无需复制",
+        );
+        assertLayout(
+          "流畅切页只描述可缓存的静态图片",
+          playbackCopy.body.includes("可预加载的静态图片") &&
+            !playbackCopy.body.includes("相邻内容"),
+          playbackCopy.body,
+        );
+        assertLayout(
+          "设备示意图与规格顶部对齐",
+          Math.abs(desktop.hardwareFigure.top - desktop.hardwareSpec.top) < 1,
+          `相差 ${Math.round(Math.abs(desktop.hardwareFigure.top - desktop.hardwareSpec.top))}px`,
+        );
+        assertLayout(
+          "相邻 section 只保留一份垂直间距",
+          desktop.gaps.heroToInstall <= 112 &&
+            desktop.gaps.workbenchToWorkflow <= 112 &&
+            desktop.gaps.workflowToFeatures <= 160 &&
+            desktop.gaps.featuresToHardware <= 160,
+          `${Math.round(desktop.gaps.heroToInstall)} / ${Math.round(desktop.gaps.workbenchToWorkflow)} / ${Math.round(desktop.gaps.workflowToFeatures)} / ${Math.round(desktop.gaps.featuresToHardware)}px`,
+        );
+        assertLayout(
+          "后续流程直接连接功能区",
+          desktop.workflowDirectlyPrecedesFeatures &&
+            desktop.gaps.workflowToFeatures <= 160,
+          `direct=${desktop.workflowDirectlyPrecedesFeatures} · gap=${Math.round(desktop.gaps.workflowToFeatures)}px`,
+        );
+
+        const beforeDesktop = captures.get(959);
+        const firstDesktop = captures.get(960);
+        assertLayout(
+          "桌面断点不会让所有区域同时重排",
+          Math.abs(beforeDesktop.documentHeight - firstDesktop.documentHeight) < 900,
+          `页面高度变化 ${Math.round(Math.abs(beforeDesktop.documentHeight - firstDesktop.documentHeight))}px`,
+        );
+        assertLayout(
+          "功能矩阵在足够宽时才进入十二列构图",
+          firstDesktop.featureColumns === 2 && captures.get(1088).featureColumns === 12,
+          `960px=${firstDesktop.featureColumns}列，1088px=${captures.get(1088).featureColumns}列`,
+        );
+
+        const [localCard, mediaCard, tfCard, playbackCard, settingsCard] = desktop.featureCards;
+        const aligned = (first, second, edge) => Math.abs(first[edge] - second[edge]) < 1;
+        const fillsGridRow = (first, second, grid) =>
+          aligned(first, second, "top") &&
+          aligned(first, second, "bottom") &&
+          Math.abs(first.left - grid.left) < 1 &&
+          Math.abs(second.right - grid.right) < 1 &&
+          second.left > first.right;
+        assertLayout(
+          "大屏功能卡组成三行完整对齐网格",
+          fillsGridRow(localCard, mediaCard, desktop.featureGrid) &&
+            fillsGridRow(tfCard, playbackCard, desktop.featureGrid) &&
+            Math.abs(settingsCard.left - desktop.featureGrid.left) < 1 &&
+            Math.abs(settingsCard.right - desktop.featureGrid.right) < 1 &&
+            settingsCard.top > tfCard.bottom,
+          `首行底差 ${Math.round(Math.abs(localCard.bottom - mediaCard.bottom))}px，第二行底差 ${Math.round(Math.abs(tfCard.bottom - playbackCard.bottom))}px，末行宽 ${Math.round(settingsCard.width)}px / 网格 ${Math.round(desktop.featureGrid.width)}px`,
+        );
+
+        for (const capture of captures.values()) {
+          assertLayout(
+            `${capture.width}px 无横向溢出`,
+            capture.overflow <= 1,
+            `溢出 ${Math.max(0, Math.round(capture.overflow))}px`,
+          );
+        }
+      } catch (error) {
+        failures.push("测试执行失败");
+        results.push(`FAIL · 测试执行失败 · ${error.message}`);
+      }
+
+      document.querySelectorAll("iframe").forEach((frame) => frame.remove());
+      document.querySelector("#results").textContent = results.join("\n");
+      document.body.dataset.status = failures.length === 0 ? "passed" : "failed";
+      document.body.dataset.failureCount = String(failures.length);
+      document.title = failures.length === 0 ? "LAYOUT_TEST_PASSED" : "LAYOUT_TEST_FAILED";
+    </script>
+  </body>
+</html>

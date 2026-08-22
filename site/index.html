@@ -1,0 +1,364 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="color-scheme" content="dark">
+    <meta
+      name="description"
+      content="ScreenDeck 将 ESP32-S3-4848S040 变成可在局域网管理的 480×480 内容屏，并支持通过浏览器直接刷入固件。"
+    >
+    <meta property="og:type" content="website">
+    <meta property="og:title" content="ScreenDeck">
+    <meta
+      property="og:description"
+      content="ScreenDeck 将 ESP32-S3-4848S040 变成可在局域网管理的 480×480 内容屏，并支持通过浏览器直接刷入固件。"
+    >
+    <meta property="og:url" content="https://mrjoechen.github.io/ScreenDeck/">
+    <meta property="og:image" content="https://mrjoechen.github.io/ScreenDeck/assets/device-desk-photo.png">
+    <meta name="twitter:card" content="summary_large_image">
+    <link rel="canonical" href="https://mrjoechen.github.io/ScreenDeck/">
+    <title>ScreenDeck · 浏览器刷入固件</title>
+
+    <link rel="icon" href="./assets/favicon.svg" type="image/svg+xml">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+      href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;800&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;600&display=swap"
+      rel="stylesheet"
+    >
+    <link rel="stylesheet" href="./assets/site.css">
+
+    <script
+      type="module"
+      src="https://unpkg.com/esp-web-tools@10.4.0/dist/web/install-button.js?module"
+    ></script>
+    <script type="module" src="./assets/site.js"></script>
+  </head>
+  <body id="top">
+    <a class="skip-link" href="#main" data-i18n="skipLink">跳到主要内容</a>
+
+    <header class="nav-edge shell" aria-label="主导航" data-i18n-aria="navAria">
+      <a class="wordmark" href="#top" aria-label="ScreenDeck 首页" data-i18n-aria="homeAria">
+        <span class="wordmark__mark" aria-hidden="true"></span>
+        <span class="wordmark__label">ScreenDeck</span>
+      </a>
+
+      <div class="nav-edge__tools" aria-label="页面工具" data-i18n-aria="navToolsAria">
+        <a
+          id="githubLink"
+          class="button button--quiet nav-tool"
+          href="https://github.com/mrjoechen/ScreenDeck"
+          target="_blank"
+          rel="noreferrer"
+          aria-label="查看 GitHub"
+          title="查看 GitHub"
+          data-i18n-aria="githubAria"
+          data-i18n-title="githubAria"
+        >
+          <svg class="nav-tool__github" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M12 .75a11.25 11.25 0 0 0-3.56 21.92c.56.1.77-.24.77-.54v-2.1c-3.14.68-3.8-1.34-3.8-1.34-.51-1.3-1.25-1.65-1.25-1.65-1.03-.7.08-.69.08-.69 1.13.08 1.73 1.16 1.73 1.16 1.01 1.73 2.65 1.23 3.3.94.1-.73.4-1.23.72-1.51-2.5-.29-5.14-1.25-5.14-5.56 0-1.23.44-2.23 1.16-3.02-.12-.29-.5-1.43.11-2.98 0 0 .95-.3 3.1 1.15A10.7 10.7 0 0 1 12 6.1c.96 0 1.91.13 2.81.38 2.15-1.46 3.1-1.15 3.1-1.15.62 1.55.23 2.69.12 2.98.72.79 1.16 1.8 1.16 3.02 0 4.32-2.64 5.27-5.15 5.55.4.35.76 1.03.76 2.08v3.17c0 .3.2.65.78.54A11.25 11.25 0 0 0 12 .75Z"/>
+          </svg>
+          <span class="sr-only" data-i18n="githubLabel">GitHub</span>
+        </a>
+
+        <button
+          id="languageToggle"
+          class="button button--quiet nav-tool nav-tool--language"
+          type="button"
+          aria-label="切换到英文"
+          title="切换到英文"
+        >
+          <span id="languageToggleLabel" aria-hidden="true">EN</span>
+          <span class="sr-only" data-i18n="languageControl">中英文切换</span>
+        </button>
+
+        <a
+          id="donateLink"
+          class="button button--quiet nav-tool nav-tool--donate"
+          href="https://github.com/sponsors/mrjoechen"
+          target="_blank"
+          rel="noreferrer"
+          aria-label="支持 ScreenDeck"
+          title="支持 ScreenDeck"
+          data-i18n-aria="donateAria"
+          data-i18n-title="donateAria"
+        >
+          <img src="./assets/kofi-logo.webp" width="161" height="130" alt="">
+          <span class="sr-only" data-i18n="donateLabel">捐赠</span>
+        </a>
+      </div>
+    </header>
+
+    <main id="main">
+      <section class="hero shell">
+        <div class="hero__copy reveal" style="--i: 0">
+          <p class="hero__context">ESP32-S3 · 480 × 480 · LOCAL FIRST</p>
+          <h1>
+            <span class="hero-title__lead" data-i18n="heroTitleLead">把方屏，</span>
+            <span class="hero-title__accent" data-i18n="heroTitleAccent">刷成内容台。</span>
+          </h1>
+          <p class="hero__lede" data-i18n="heroLede">
+            ScreenDeck 为一块确定的硬件而写：连接 USB，在浏览器里刷入固件；首次启动扫码配网，此后在局域网直接管理文字、图片与播放顺序。
+          </p>
+          <a class="button button--outline" href="#install">
+            <span data-i18n="heroCta">立即刷入</span>
+            <span aria-hidden="true">↓</span>
+          </a>
+        </div>
+
+        <aside
+          class="hero__proof reveal"
+          style="--i: 1"
+          aria-label="当前硬件配置"
+          data-i18n-aria="heroProofAria"
+        >
+          <div class="hero__proof-head">
+            <span class="status-dot status-dot--ready" aria-hidden="true"></span>
+            <span data-i18n="supportedNow">当前已支持</span>
+          </div>
+          <strong>ESP32-S3-4848S040</strong>
+          <dl class="signal-table">
+            <div><dt data-i18n="brandLabel">品牌</dt><dd>Guition / Jingcai</dd></div>
+            <div><dt data-i18n="displayLabel">显示</dt><dd>ST7701 · 480 × 480</dd></div>
+            <div><dt data-i18n="touchLabel">触控</dt><dd>GT911</dd></div>
+            <div><dt data-i18n="storageLabel">存储</dt><dd>16 MB Flash · 8 MB PSRAM</dd></div>
+          </dl>
+          <p data-i18n="proofNote">更多型号会以独立固件清单加入，不会让相同芯片的不同屏幕误刷同一镜像。</p>
+        </aside>
+
+        <div class="hero__baseline" aria-label="刷写链路" data-i18n-aria="flashPathAria">
+          <span>WEB SERIAL</span>
+          <span>USB</span>
+          <span>115200 BAUD</span>
+          <span>ESP32-S3</span>
+        </div>
+      </section>
+
+      <section id="install" class="install-section shell" aria-labelledby="install-title">
+        <header class="section-head head-hang">
+          <div>
+            <h2 id="install-title" data-i18n="installTitle">浏览器刷机台</h2>
+            <p data-i18n="installIntro">不安装桌面软件。型号确认后，浏览器会让你选择串口并完成芯片识别、擦除确认、写入与校验。</p>
+          </div>
+          <dl class="release-line" aria-label="固件发布信息" data-i18n-aria="releaseAria">
+            <div><dt data-i18n="channelLabel">通道</dt><dd id="releaseChannel">Development</dd></div>
+            <div><dt data-i18n="versionLabel">版本</dt><dd id="releaseVersion">development</dd></div>
+            <div><dt data-i18n="updatedLabel">更新</dt><dd id="releaseUpdated">—</dd></div>
+            <div><dt data-i18n="imageLabel">镜像</dt><dd>Factory · offset 0x0</dd></div>
+          </dl>
+        </header>
+
+        <div class="workbench">
+          <div class="workbench__main">
+            <div class="workbench__title-row">
+              <h3 data-i18n="chooseDevice">选择设备</h3>
+              <span id="registryState" class="registry-state" aria-live="polite" data-i18n="registryLoading">读取型号清单…</span>
+            </div>
+
+            <div
+              id="deviceList"
+              class="device-picker"
+              role="radiogroup"
+              aria-label="支持的设备型号"
+              data-i18n-aria="deviceListAria"
+            >
+              <div class="device-picker__loading" aria-hidden="true"></div>
+            </div>
+
+            <label class="confirm-line" for="deviceConfirm">
+              <input id="deviceConfirm" type="checkbox" disabled>
+              <span>
+                <span data-i18n="confirmPrefix">我已核对屏幕背面型号为</span>
+                <strong id="confirmedModel">ESP32-S3-4848S040</strong><span data-i18n="confirmSuffix">，并知道全新安装可能清除设备中的内容与设置。</span>
+              </span>
+            </label>
+
+            <div class="install-action">
+              <esp-web-install-button id="webInstaller">
+                <button
+                  id="flashButton"
+                  class="button button--flash"
+                  type="button"
+                  slot="activate"
+                  disabled
+                  aria-describedby="installHelper"
+                >
+                  <span class="button__label" data-i18n="flashButton">连接设备并刷入</span>
+                </button>
+                <p class="installer-message" slot="unsupported" data-i18n="unsupportedMessage">
+                  当前浏览器不支持 Web Serial。请改用桌面版 Chrome、Edge 或支持该能力的 Firefox。
+                </p>
+                <p class="installer-message" slot="not-allowed" data-i18n="notAllowedMessage">
+                  浏览器只允许在 HTTPS 或 localhost 页面刷写设备。GitHub Pages 部署后会自动满足 HTTPS 条件。
+                </p>
+              </esp-web-install-button>
+              <p id="installHelper" class="install-helper" aria-live="polite" data-i18n="helperSelect">
+                先选择已支持的型号，并完成上方确认。
+              </p>
+            </div>
+
+            <details class="boot-help">
+              <summary data-i18n="bootHelpTitle">浏览器没有找到串口？</summary>
+              <div>
+                <p data-i18n="bootHelpCable">换用可传输数据的 USB 线，并关闭正在占用串口的监视器。若设备未自动进入下载模式，按住 BOOT，再点击刷入；开始连接后可短按 RESET。</p>
+                <p data-i18n="bootHelpBrowser">Safari、iOS 与多数移动浏览器不提供 Web Serial；请在桌面浏览器完成刷写。</p>
+              </div>
+            </details>
+          </div>
+
+          <aside class="workbench__rail" aria-label="刷写前置检查" data-i18n-aria="preflightAria">
+            <h3 data-i18n="preflightTitle">开始前检查</h3>
+            <ul class="check-list">
+              <li id="secureCheck" data-state="checking">
+                <span class="check-list__signal" aria-hidden="true"></span>
+                <div><strong data-i18n="securePage">安全页面</strong><span data-i18n="checkingSecure">正在检查 HTTPS / localhost</span></div>
+              </li>
+              <li id="serialCheck" data-state="checking">
+                <span class="check-list__signal" aria-hidden="true"></span>
+                <div><strong>Web Serial</strong><span data-i18n="checkingSerial">正在检查浏览器能力</span></div>
+              </li>
+              <li data-state="ready">
+                <span class="check-list__signal" aria-hidden="true"></span>
+                <div><strong data-i18n="baudRate">串口速率</strong><span data-i18n="baudDetail">固定使用 115200，匹配当前硬件链路</span></div>
+              </li>
+              <li data-state="warning">
+                <span class="check-list__signal" aria-hidden="true"></span>
+                <div><strong data-i18n="modelNotDetected">型号不会自动判定</strong><span data-i18n="modelDetail">浏览器只能识别 ESP32-S3，不能识别具体屏幕板型</span></div>
+              </li>
+            </ul>
+            <p class="workbench__rail-note" data-i18n="railNote">刷写过程约需数分钟。保持页面可见，期间不要拔线或关闭浏览器。</p>
+          </aside>
+        </div>
+      </section>
+
+      <section class="workflow-section shell" aria-labelledby="workflow-title">
+        <header class="section-head section-head--compact">
+          <h2 id="workflow-title" data-i18n="workflowTitle">从 USB 到第一张画面</h2>
+        </header>
+        <ol class="steps">
+          <li>
+            <span class="stage">1.0</span>
+            <div><h3 data-i18n="stepConnectTitle">连接。</h3><p data-i18n="stepConnectBody">用数据线连接设备，选择浏览器列出的串口。刷机台会先确认芯片家族为 ESP32-S3。</p></div>
+          </li>
+          <li>
+            <span class="stage">2.0</span>
+            <div><h3 data-i18n="stepWriteTitle">写入。</h3><p data-i18n="stepWriteBody">Factory 镜像从 0x000000 写入，包含 bootloader、分区表与应用；空白设备不需要另刷其他文件。</p></div>
+          </li>
+          <li>
+            <span class="stage">3.0</span>
+            <div><h3 data-i18n="stepProvisionTitle">配网。</h3><p data-i18n="stepProvisionBody">重启后扫描屏幕上的 Wi‑Fi 二维码，完成首次联网；之后通过屏幕显示的局域网地址管理内容。</p></div>
+          </li>
+        </ol>
+      </section>
+
+      <section class="feature-section shell" aria-labelledby="feature-title">
+        <header class="section-head section-head--compact">
+          <div>
+            <h2 id="feature-title" data-i18n="featureTitle">固件做什么</h2>
+            <p data-i18n="featureIntro">页面展示的每一项都来自当前固件实现；没有云服务、虚构指标或尚未适配的设备承诺。</p>
+          </div>
+        </header>
+
+        <div class="feature-matrix">
+          <article class="feature feature--wide">
+            <p class="feature__signal">LOCAL CONTROL</p>
+            <h3 data-i18n="localTitle">在局域网管理内容。</h3>
+            <p data-i18n="localBody">首次启动时完成 Wi-Fi 配置，之后可在浏览器中添加文字和图片、调整播放顺序，并控制屏幕亮度。</p>
+            <span class="feature__fact" data-i18n="localFact">无需云账号 · 设置保存在设备中 · 中英文界面</span>
+          </article>
+
+          <article class="feature feature--tall">
+            <p class="feature__signal">MEDIA</p>
+            <h3 data-i18n="mediaTitle">上传图片与 GIF。</h3>
+            <p data-i18n="mediaBody">PNG 和 JPG 自动居中裁切为 480 × 480；不超过 2 MB、480 × 480 的 GIF 保留动画并按原尺寸居中播放。</p>
+            <span class="feature__fact" data-i18n="mediaFact">最多 16 个内容页 · PNG · JPG · GIF</span>
+          </article>
+
+          <article class="feature">
+            <p class="feature__signal">TF CARD</p>
+            <h3 data-i18n="tfTitle">直接播放 TF 卡内容。</h3>
+            <p data-i18n="tfBody">可从 TF 卡直接添加 PNG、JPG（.jpg）、GIF 与 ScreenDeck 480 × 480（.rgb565）文件，无需复制到机身存储。</p>
+            <span class="feature__fact" data-i18n="tfFact">扫描 3 层目录 · .jpg 后缀 · GIF ≤ 480 × 480</span>
+          </article>
+
+          <article class="feature feature--offset">
+            <p class="feature__signal">SMOOTH PLAYBACK</p>
+            <h3 data-i18n="playbackTitle">切页更流畅。</h3>
+            <p data-i18n="playbackBody">固件会缓存可预加载的静态图片，并采用整帧更新和淡入淡出，减少切换时的撕裂、闪烁与旧画面残留。</p>
+            <span class="feature__fact" data-i18n="playbackFact">静态图片预加载 · 整帧更新 · 淡入淡出</span>
+          </article>
+
+          <article class="feature feature--wide feature--settings">
+            <p class="feature__signal">DISPLAY CONTROL</p>
+            <h3 data-i18n="settingsTitle">调节显示与作息。</h3>
+            <p data-i18n="settingsBody">支持联网自动校时、日期时间叠层、5–100% 亮度和跨午夜定时息屏；息屏后可双击临时唤醒。</p>
+            <span class="feature__fact" data-i18n="settingsFact">自动校时 · 定时息屏 · 双击唤醒</span>
+          </article>
+        </div>
+      </section>
+
+      <section class="hardware-section shell" aria-labelledby="hardware-title">
+        <header class="section-head section-head--compact">
+          <div>
+            <h2 id="hardware-title" data-i18n="hardwareTitle">支持设备</h2>
+            <p data-i18n="hardwareIntro">当前只列出有代码与构建配置依据的板型。后续新增型号时，每台设备使用独立清单与固件路径。</p>
+          </div>
+        </header>
+
+        <div class="hardware-layout">
+          <figure class="annotated-device">
+            <img
+              src="./assets/device.svg"
+              width="1200"
+              height="900"
+              loading="lazy"
+              alt="ESP32-S3-4848S040 方形触控屏的技术示意，标出 ESP32-S3、ST7701、GT911，以及右侧的 TF 卡槽和 USB Type-C 接口"
+              data-i18n-alt="deviceAlt"
+            >
+            <figcaption data-i18n="figureCaption">结构示意，不是产品实拍。刷写前仍需核对 PCB 或商品页上的完整型号。</figcaption>
+          </figure>
+
+          <div class="hardware-spec">
+            <div class="hardware-spec__status">
+              <span class="status-dot status-dot--ready" aria-hidden="true"></span>
+              <span data-i18n="supportedBuild">已支持并提供构建配置</span>
+            </div>
+            <h3>Guition / Jingcai<br>ESP32-S3-4848S040</h3>
+            <dl class="spec-sheet">
+              <div><dt>MCU</dt><dd>ESP32-S3 rev 0.2</dd></div>
+              <div><dt>Flash</dt><dd>16 MB · DIO · 80 MHz</dd></div>
+              <div><dt>PSRAM</dt><dd>8 MB · OPI</dd></div>
+              <div><dt>LCD</dt><dd>ST7701 · RGB · 480 × 480</dd></div>
+              <div><dt>Touch</dt><dd>GT911 · capacitive</dd></div>
+              <div><dt>Storage</dt><dd>LittleFS + TF card</dd></div>
+            </dl>
+            <div class="hardware-spec__next">
+              <strong data-i18n="moreModels">更多型号正在适配</strong>
+              <span data-i18n="moreModelsNote">尚未验证的设备不会提前列入“已支持”。</span>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="foot-stmt shell">
+      <p class="foot-stmt__line" data-i18n="footerStatement">一块方屏，不必只显示默认画面。</p>
+      <div class="foot-stmt__meta">
+        <a class="wordmark" href="#top">
+          <span class="wordmark__mark" aria-hidden="true"></span>
+          <span>ScreenDeck</span>
+        </a>
+        <nav aria-label="页脚导航" data-i18n-aria="footerAria">
+          <a href="#install" data-i18n="footerFlash">网页刷入</a>
+          <a href="#hardware-title" data-i18n="footerHardware">支持设备</a>
+        </nav>
+        <span>ESP32-S3 · 2026</span>
+      </div>
+    </footer>
+
+    <noscript>
+      <div class="noscript-note" data-i18n="noscript">网页刷机台需要 JavaScript。请启用 JavaScript 后重新载入页面。</div>
+    </noscript>
+  </body>
+</html>

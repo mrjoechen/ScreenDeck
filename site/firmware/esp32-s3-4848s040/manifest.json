@@ -1,0 +1,17 @@
+{
+  "name": "ScreenDeck · ESP32-S3-4848S040",
+  "version": "development",
+  "new_install_prompt_erase": true,
+  "new_install_improv_wait_time": 0,
+  "builds": [
+    {
+      "chipFamily": "ESP32-S3",
+      "parts": [
+        {
+          "path": "./screendeck-esp32s3-4848s040-factory.bin",
+          "offset": 0
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,47 @@
+# Build and component manager output
+.pio/
+build/
+managed_components/
+compile_commands.json
+
+# Generated ESP-IDF config. Keep committed sdkconfig.defaults* files.
+sdkconfig
+sdkconfig.old
+/sdkconfig.esp32s3
+
+# Generated web-flash image (CI rebuilds this on every Pages deploy)
+site/firmware/**/*.bin
+
+# Written by tools/inject_version.py / tools/screendeck_version.py write-header
+include/screendeck_version_generated.h
+
+# Local-only dumps and migration leftovers
+dist/
+firmware-backups/
+migration-backups/
+
+# Local working notes (not part of the public tree)
+.claude/
+.hallmark/
+docs/superpowers/
+plans/
+
+# IDE / OS
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Logs and temp
+*.log
+tmp/
+.cache/

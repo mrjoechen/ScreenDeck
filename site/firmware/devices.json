@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "devices": [
+    {
+      "id": "esp32-s3-4848s040",
+      "name": "ESP32-S3-4848S040",
+      "vendor": "Guition / Jingcai",
+      "summary": "480 × 480 · ST7701 · GT911 · 16 MB Flash · 8 MB PSRAM",
+      "chipFamily": "ESP32-S3",
+      "status": "development",
+      "version": "development",
+      "builtAt": null,
+      "builtOn": null,
+      "manifest": "./firmware/esp32-s3-4848s040/manifest.json"
+    }
+  ]
+}

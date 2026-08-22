@@ -1,0 +1,139 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 900" role="img" aria-labelledby="title desc">
+  <title id="title">ScreenDeck ESP32-S3-4848S040 hardware schematic</title>
+  <desc id="desc">Technical schematic of the supported Guition or Jingcai ESP32-S3-4848S040 board, with the TF card slot centered on the right edge and the USB Type-C port directly below it, plus labels for the 480 by 480 display, ESP32-S3 processor, ST7701 display controller, and GT911 touch controller.</desc>
+  <style>
+    :root {
+      --sd-ink: #111719;
+      --sd-ink-2: #20282a;
+      --sd-paper: #f4efe6;
+      --sd-acid: #e7ff54;
+      --sd-coral: #ff7058;
+      --sd-muted: #8e9a9d;
+      --sd-line: #465154;
+      --sd-grid: #273033;
+      --sd-screen: #151c1e;
+      --sd-font-mono: "SFMono-Regular", "Liberation Mono", monospace;
+      --sd-font-sans: "Avenir Next", "PingFang SC", "Hiragino Sans GB", sans-serif;
+    }
+    .bg{fill:var(--sd-ink)}
+    .panel{fill:var(--sd-ink-2);stroke:var(--sd-line);stroke-width:2}
+    .screen{fill:var(--sd-screen);stroke:var(--sd-paper);stroke-width:2}
+    .grid-line{stroke:var(--sd-grid);stroke-width:1}
+    .wire{fill:none;stroke:var(--sd-line);stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+    .wire-hot{fill:none;stroke:var(--sd-acid);stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+    .paper{fill:var(--sd-paper)}
+    .acid{fill:var(--sd-acid)}
+    .coral{fill:var(--sd-coral)}
+    .muted{fill:var(--sd-muted)}
+    .mono{font-family:var(--sd-font-mono)}
+    .sans{font-family:var(--sd-font-sans)}
+    .eyebrow{font-size:13px;font-weight:700;letter-spacing:3px}
+    .label{font-size:20px;font-weight:700;letter-spacing:.4px}
+    .detail{font-size:13px;letter-spacing:1.2px}
+    .pin{fill:var(--sd-ink);stroke:var(--sd-acid);stroke-width:2}
+    .chip{fill:var(--sd-ink);stroke:var(--sd-paper);stroke-width:2}
+    .trace{fill:none;stroke:var(--sd-grid);stroke-width:2}
+    *{vector-effect:non-scaling-stroke}
+  </style>
+
+  <defs>
+    <pattern id="draft-grid" width="32" height="32" patternUnits="userSpaceOnUse">
+      <path d="M32 0H0V32" class="grid-line" fill="none"/>
+      <circle cx="1" cy="1" r="1.3" fill="var(--sd-line)"/>
+    </pattern>
+    <clipPath id="screen-clip">
+      <rect x="354" y="196" width="492" height="492" rx="20"/>
+    </clipPath>
+  </defs>
+
+  <rect width="1200" height="900" class="bg"/>
+  <rect width="1200" height="900" fill="url(#draft-grid)" opacity=".42"/>
+  <path d="M54 68h44" stroke="var(--sd-acid)" stroke-width="10" stroke-linecap="round"/>
+  <text x="116" y="74" class="sans paper eyebrow">SCREENDECK / HARDWARE MAP</text>
+  <text x="1146" y="74" text-anchor="end" class="mono muted detail">REV · ESP32-S3-4848S040</text>
+  <line x1="54" y1="104" x2="1146" y2="104" class="wire"/>
+
+  <!-- Functional board silhouette; intentionally schematic, not a product photograph. -->
+  <rect id="board-outline" x="322" y="164" width="556" height="556" rx="42" class="panel"/>
+  <path d="M350 190h500M350 694h500M348 218v448M852 218v448" class="trace"/>
+  <circle cx="350" cy="192" r="8" class="pin"/>
+  <circle cx="850" cy="192" r="8" class="pin"/>
+  <circle cx="350" cy="692" r="8" class="pin"/>
+  <circle cx="850" cy="692" r="8" class="pin"/>
+
+  <g clip-path="url(#screen-clip)">
+    <rect x="354" y="196" width="492" height="492" class="screen"/>
+    <path d="M354 319h492M354 442h492M354 565h492M477 196v492M600 196v492M723 196v492" class="grid-line" opacity=".8"/>
+    <path d="M386 656 814 228M386 228l428 428" class="trace" opacity=".6"/>
+    <rect x="397" y="239" width="406" height="406" rx="10" fill="none" stroke="var(--sd-acid)" stroke-width="2"/>
+  </g>
+  <rect x="354" y="196" width="492" height="492" rx="20" fill="none" stroke="var(--sd-paper)" stroke-width="2"/>
+
+  <text x="600" y="399" text-anchor="middle" class="mono acid" font-size="86" font-weight="800" letter-spacing="-7">480×480</text>
+  <text x="600" y="438" text-anchor="middle" class="mono paper eyebrow">SQUARE RGB DISPLAY</text>
+  <text x="600" y="588" text-anchor="middle" class="mono muted detail">GUItion / JINGCAI · FUNCTIONAL SCHEMATIC</text>
+
+  <!-- Confirmed interfaces and controller blocks. -->
+  <g id="tf-card-slot" aria-label="TF card slot">
+    <path d="M878 404h26v76h-26" class="wire-hot"/>
+    <path d="M878 414h34v56h-34z" fill="var(--sd-ink)" stroke="var(--sd-coral)" stroke-width="2"/>
+    <path d="M891 424v36" stroke="var(--sd-muted)" stroke-width="3" stroke-dasharray="5 6"/>
+  </g>
+  <g id="usb-type-c-port" aria-label="USB Type-C port">
+    <path d="M878 548h16" class="wire-hot"/>
+    <rect x="878" y="548" width="42" height="54" rx="12" fill="var(--sd-ink)" stroke="var(--sd-coral)" stroke-width="2"/>
+    <rect x="889" y="558" width="20" height="34" rx="8" fill="none" stroke="var(--sd-muted)" stroke-width="2"/>
+    <path d="M899 566v18" stroke="var(--sd-muted)" stroke-width="3" stroke-linecap="round"/>
+  </g>
+  <g aria-label="ESP32-S3 controller" transform="translate(756 648)">
+    <rect width="80" height="52" rx="7" class="chip"/>
+    <path d="M10-7v7m15-7v7m15-7v7m15-7v7m15-7v7M10 52v7m15-7v7m15-7v7m15-7v7m15-7v7" class="wire"/>
+    <text x="40" y="23" text-anchor="middle" class="mono paper" font-size="10" font-weight="700">ESP32</text>
+    <text x="40" y="38" text-anchor="middle" class="mono acid" font-size="10" font-weight="700">S3</text>
+  </g>
+
+  <!-- Callouts -->
+  <g>
+    <circle cx="398" cy="239" r="5" class="acid"/>
+    <path d="M398 239H236l-28-28" class="wire-hot"/>
+    <text x="62" y="187" class="mono acid eyebrow">TOUCH / 01</text>
+    <text x="62" y="216" class="sans paper label">GT911</text>
+    <text x="62" y="238" class="mono muted detail">CAPACITIVE TOUCH</text>
+  </g>
+
+  <g>
+    <circle cx="803" cy="320" r="5" class="acid"/>
+    <path d="M803 320h166l28-28" class="wire-hot"/>
+    <text x="1138" y="268" text-anchor="end" class="mono acid eyebrow">DISPLAY / 02</text>
+    <text x="1138" y="297" text-anchor="end" class="sans paper label">ST7701</text>
+    <text x="1138" y="319" text-anchor="end" class="mono muted detail">RGB PANEL DRIVER</text>
+  </g>
+
+  <g id="tf-card-callout">
+    <circle cx="912" cy="442" r="5" class="coral"/>
+    <path d="M912 442h57l28-28" fill="none" stroke="var(--sd-coral)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="1138" y="390" text-anchor="end" class="mono coral eyebrow">MEDIA / 03</text>
+    <text x="1138" y="419" text-anchor="end" class="sans paper label">TF CARD</text>
+    <text x="1138" y="441" text-anchor="end" class="mono muted detail">LOCAL MEDIA</text>
+  </g>
+
+  <g id="usb-type-c-callout">
+    <circle cx="920" cy="575" r="5" class="coral"/>
+    <path d="M920 575h49l28-28" fill="none" stroke="var(--sd-coral)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="1138" y="523" text-anchor="end" class="mono coral eyebrow">PORT / 04</text>
+    <text x="1138" y="552" text-anchor="end" class="sans paper label">USB TYPE-C</text>
+    <text x="1138" y="574" text-anchor="end" class="mono muted detail">FLASH + POWER</text>
+  </g>
+
+  <g id="esp32-callout">
+    <circle cx="796" cy="674" r="5" class="acid"/>
+    <path d="M796 674h173l28-28" class="wire-hot"/>
+    <text x="1138" y="622" text-anchor="end" class="mono acid eyebrow">CONTROL / 05</text>
+    <text x="1138" y="651" text-anchor="end" class="sans paper label">ESP32-S3</text>
+    <text x="1138" y="673" text-anchor="end" class="mono muted detail">MCU · WI-FI · PSRAM</text>
+  </g>
+
+  <line x1="54" y1="832" x2="1146" y2="832" class="wire"/>
+  <text x="54" y="864" class="mono muted detail">SUPPORTED DEVICE · ESP32-S3-4848S040</text>
+  <text x="1146" y="864" text-anchor="end" class="mono muted detail">FUNCTIONAL SCHEMATIC · NOT TO SCALE</text>
+</svg>
