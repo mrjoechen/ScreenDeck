@@ -15,7 +15,7 @@
       content="ScreenDeck 将 ESP32-S3-4848S040 变成可在局域网管理的 480×480 内容屏，并支持通过浏览器直接刷入固件。"
     >
     <meta property="og:url" content="https://mrjoechen.github.io/ScreenDeck/">
-    <meta property="og:image" content="https://mrjoechen.github.io/ScreenDeck/assets/device-desk-photo.png">
+    <meta property="og:image" content="https://mrjoechen.github.io/ScreenDeck/assets/device_preview_01.JPG">
     <meta name="twitter:card" content="summary_large_image">
     <link rel="canonical" href="https://mrjoechen.github.io/ScreenDeck/">
     <title>ScreenDeck · 浏览器刷入固件</title>
@@ -101,10 +101,22 @@
           <p class="hero__lede" data-i18n="heroLede">
             ScreenDeck 为一块确定的硬件而写：连接 USB，在浏览器里刷入固件；首次启动扫码配网，此后在局域网直接管理文字、图片与播放顺序。
           </p>
-          <a class="button button--outline" href="#install">
-            <span data-i18n="heroCta">立即刷入</span>
-            <span aria-hidden="true">↓</span>
-          </a>
+          <div class="hero__actions">
+            <a class="button button--outline" href="#install">
+              <span data-i18n="heroCta">立即刷入</span>
+              <span aria-hidden="true">↓</span>
+            </a>
+            <a
+              id="deviceLink"
+              class="button"
+              href="http://screendeck.local/"
+              aria-label="打开局域网中的 ScreenDeck 控制器"
+              title="http://screendeck.local/"
+              data-i18n-aria="deviceAria"
+            >
+              <span data-i18n="deviceCta">打开设备</span>
+            </a>
+          </div>
         </div>
 
         <aside
@@ -351,6 +363,7 @@
         </a>
         <nav aria-label="页脚导航" data-i18n-aria="footerAria">
           <a href="#install" data-i18n="footerFlash">网页刷入</a>
+          <a href="http://screendeck.local/" data-i18n="footerDevice">打开设备</a>
           <a href="#hardware-title" data-i18n="footerHardware">支持设备</a>
         </nav>
         <span>ESP32-S3 · 2026</span>

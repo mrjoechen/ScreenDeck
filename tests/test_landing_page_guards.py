@@ -50,8 +50,11 @@ class LandingPageGuards(unittest.TestCase):
             'href="https://github.com/mrjoechen/ScreenDeck"',
             'id="languageToggle"',
             'id="donateLink"',
+            'id="deviceLink"',
+            'href="http://screendeck.local/"',
             'src="./assets/kofi-logo.webp"',
             'data-i18n="heroCta">立即刷入',
+            'data-i18n="deviceCta">打开设备',
         ):
             self.assertIn(fragment, INDEX)
 
@@ -62,13 +65,13 @@ class LandingPageGuards(unittest.TestCase):
     def test_site_is_ready_for_github_pages_sharing(self) -> None:
         self.assertIn('content="https://mrjoechen.github.io/ScreenDeck/"', INDEX)
         self.assertIn(
-            'content="https://mrjoechen.github.io/ScreenDeck/assets/device-desk-photo.png"',
+            'content="https://mrjoechen.github.io/ScreenDeck/assets/device_preview_01.JPG"',
             INDEX,
         )
         self.assertTrue((SITE / ".nojekyll").is_file())
         self.assertTrue((SITE / "robots.txt").is_file())
         self.assertTrue((SITE / "404.html").is_file())
-        self.assertTrue((SITE / "assets" / "device-desk-photo.png").is_file())
+        self.assertTrue((SITE / "assets" / "device_preview_01.JPG").is_file())
 
     def test_hero_uses_hardware_proof_without_a_preview_pager(self) -> None:
         self.assertIn('class="hero__proof reveal"', INDEX)

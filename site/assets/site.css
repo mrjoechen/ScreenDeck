@@ -311,6 +311,13 @@ h3 {
   gap: var(--space-lg);
 }
 
+.hero__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
 .hero__context,
 .feature__signal,
 .registry-state,
