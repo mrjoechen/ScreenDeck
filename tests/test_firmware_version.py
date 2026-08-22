@@ -21,7 +21,6 @@ HEADER = (ROOT / "include" / "screendeck_version.h").read_text()
 GITIGNORE = (ROOT / ".gitignore").read_text()
 PIO = (ROOT / "platformio.ini").read_text()
 RELEASE_WORKFLOW = (ROOT / ".github" / "workflows" / "release.yml").read_text()
-PAGES_WORKFLOW = (ROOT / ".github" / "workflows" / "pages.yml").read_text()
 MERGE = (ROOT / "tools" / "merge-web-firmware.sh").read_text()
 
 
@@ -181,15 +180,16 @@ class FirmwareVersionGuards(unittest.TestCase):
         ):
             self.assertIn(fragment, RELEASE_WORKFLOW)
         self.assertIn("contents: write", RELEASE_WORKFLOW)
+        self.assertNotIn("branches:", RELEASE_WORKFLOW)
+        self.assertFalse(
+            (ROOT / ".github" / "workflows" / "pages.yml").exists(),
+            "Pages must ship with the tagged release workflow, not a main-branch deploy",
+        )
 
-    def test_pages_prefers_the_latest_github_release_factory_image(self) -> None:
-        self.assertIn("gh release download", PAGES_WORKFLOW)
-        self.assertIn("pio run", PAGES_WORKFLOW)
-        self.assertIn("merge-web-firmware.sh", PAGES_WORKFLOW)
+    def test_merge_script_writes_a_dio_factory_image(self) -> None:
         self.assertIn("--flash-mode dio", MERGE)
         self.assertIn("--flash-freq 80m", MERGE)
         self.assertIn("--flash-size 16MB", MERGE)
-        self.assertNotIn("dist/", PAGES_WORKFLOW)
 
 
 if __name__ == "__main__":

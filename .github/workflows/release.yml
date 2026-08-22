@@ -44,7 +44,7 @@ jobs:
             ${{ runner.os }}-python-3.12-platformio-
 
       - name: Install build tools
-        run: python -m pip install "platformio==6.1.19" "esptool==5.1.2"
+        run: python -m pip install "platformio==6.1.19" "esptool==5.1.0"
 
       - name: Stamp version from tag
         run: |

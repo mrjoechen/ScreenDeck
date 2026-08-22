@@ -795,11 +795,20 @@ class RgbCorruptionGuards(unittest.TestCase):
         align_clock = function_body(
             DISPLAY_SOURCE, "void alignPlaybackClockCard("
         )
+        self.assertRegex(
+            DISPLAY_SOURCE,
+            r"PLAYBACK_CLOCK_INSET\s*=\s*16",
+        )
+        self.assertNotIn("16, 48", align_clock)
         for alignment in (
-            "lv_obj_align(card, LV_ALIGN_TOP_LEFT, 16, 48)",
-            "lv_obj_align(card, LV_ALIGN_TOP_RIGHT, -16, 16)",
-            "lv_obj_align(card, LV_ALIGN_BOTTOM_LEFT, 16, -16)",
-            "lv_obj_align(card, LV_ALIGN_BOTTOM_RIGHT, -16, -16)",
+            "lv_obj_align(card, LV_ALIGN_TOP_LEFT, PLAYBACK_CLOCK_INSET,\n"
+            "                   PLAYBACK_CLOCK_INSET)",
+            "lv_obj_align(card, LV_ALIGN_TOP_RIGHT, -PLAYBACK_CLOCK_INSET,\n"
+            "                   PLAYBACK_CLOCK_INSET)",
+            "lv_obj_align(card, LV_ALIGN_BOTTOM_LEFT, PLAYBACK_CLOCK_INSET,\n"
+            "                   -PLAYBACK_CLOCK_INSET)",
+            "lv_obj_align(card, LV_ALIGN_BOTTOM_RIGHT, -PLAYBACK_CLOCK_INSET,\n"
+            "                   -PLAYBACK_CLOCK_INSET)",
         ):
             self.assertIn(alignment, align_clock)
 

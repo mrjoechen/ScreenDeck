@@ -50,6 +50,7 @@ constexpr uint32_t PLAYBACK_CLOCK_MOVE_INTERVAL_MS = 60000;
 // minute position change brief.
 constexpr uint32_t PLAYBACK_CLOCK_FADE_IN_MS = 120;
 constexpr uint8_t PLAYBACK_CLOCK_CORNER_COUNT = 4;
+constexpr int16_t PLAYBACK_CLOCK_INSET = 16;
 // A double tap inside a scheduled screen-off window wakes the panel. The wake
 // then behaves like a phone's screen timeout: it survives as long as the user
 // keeps touching, and only expires after this much idle time.
@@ -1057,16 +1058,20 @@ void alignPlaybackClockCard(lv_obj_t* card) {
 
   switch (playbackClockCorner) {
     case PlaybackClockCorner::TopLeft:
-      lv_obj_align(card, LV_ALIGN_TOP_LEFT, 16, 48);
+      lv_obj_align(card, LV_ALIGN_TOP_LEFT, PLAYBACK_CLOCK_INSET,
+                   PLAYBACK_CLOCK_INSET);
       break;
     case PlaybackClockCorner::TopRight:
-      lv_obj_align(card, LV_ALIGN_TOP_RIGHT, -16, 16);
+      lv_obj_align(card, LV_ALIGN_TOP_RIGHT, -PLAYBACK_CLOCK_INSET,
+                   PLAYBACK_CLOCK_INSET);
       break;
     case PlaybackClockCorner::BottomLeft:
-      lv_obj_align(card, LV_ALIGN_BOTTOM_LEFT, 16, -16);
+      lv_obj_align(card, LV_ALIGN_BOTTOM_LEFT, PLAYBACK_CLOCK_INSET,
+                   -PLAYBACK_CLOCK_INSET);
       break;
     case PlaybackClockCorner::BottomRight:
-      lv_obj_align(card, LV_ALIGN_BOTTOM_RIGHT, -16, -16);
+      lv_obj_align(card, LV_ALIGN_BOTTOM_RIGHT, -PLAYBACK_CLOCK_INSET,
+                   -PLAYBACK_CLOCK_INSET);
       break;
   }
 }

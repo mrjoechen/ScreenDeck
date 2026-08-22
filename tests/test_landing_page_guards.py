@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SITE = ROOT / "site"
 INDEX = (SITE / "index.html").read_text()
 SITE_JS = (SITE / "assets" / "site.js").read_text()
-WORKFLOW = (ROOT / ".github" / "workflows" / "pages.yml").read_text()
+WORKFLOW = (ROOT / ".github" / "workflows" / "release.yml").read_text()
 MERGE = (ROOT / "tools" / "merge-web-firmware.sh").read_text()
 
 
@@ -130,10 +130,14 @@ class LandingPageGuards(unittest.TestCase):
         self.assertIn("channelRelease", SITE_JS)
 
     def test_deploy_workflow_rebuilds_and_merges_the_current_firmware(self) -> None:
+        self.assertIn('tags:', WORKFLOW)
+        self.assertIn('"v*"', WORKFLOW)
+        self.assertNotIn("branches:", WORKFLOW)
         for fragment in (
             "pio run",
             "merge-web-firmware.sh",
-            "image-info",
+            "gh release create",
+            "deploy-pages",
         ):
             self.assertIn(fragment, WORKFLOW)
         for fragment in (
@@ -144,6 +148,7 @@ class LandingPageGuards(unittest.TestCase):
             "0x0",
             "0x8000",
             "0x10000",
+            "image-info",
         ):
             self.assertIn(fragment, MERGE)
         self.assertNotIn("dist/", WORKFLOW)
