@@ -2,13 +2,18 @@
 
 [English](README.md) | 中文
 
-ScreenDeck 把桂顿 / 晶彩 ESP32-S3-4848S040 变成可在局域网管理、左右滑动切换的 480×480 内容屏。
+ScreenDeck 把Guition / Jingcai ESP32-S3-4848S040 变成可在局域网管理、左右滑动切换的 480×480 内容屏。
 
-无需安装桌面软件，用浏览器刷入： **https://mrjoechen.github.io/ScreenDeck/**
+无需安装桌面软件，数据线连接设备，直接用浏览器刷入： **https://mrjoechen.github.io/ScreenDeck/**
 
 <p>
-  <img src="site/assets/device_preview_01.JPG" alt="桌上的 ScreenDeck，正在显示设备设置" width="240">
-  <img src="site/assets/device_preview_02.JPG" alt="ScreenDeck 全屏播放图片，并叠日期时间" width="240">
+  <img src="site/assets/device_preview_01.JPG" alt="桌上的 ScreenDeck，正在显示设备设置" width="30%">
+  <img src="site/assets/device_preview_02.JPG" alt="ScreenDeck 全屏播放图片，并叠日期时间" width="30%">
+</p>
+
+<p>
+  <img src="site/assets/device_preview.jpg" alt="ESP32-S3-4848S040 preview" width="30%">
+  <img src="site/assets/device_preview_spec.webp" alt="ESP32-S3-4848S040 specifications" width="30%">
 </p>
 
 ## 功能

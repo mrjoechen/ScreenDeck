@@ -18,6 +18,7 @@ MAIN = (ROOT / "src" / "main.cpp").read_text()
 WEB = (ROOT / "src" / "web_portal.cpp").read_text()
 DISPLAY = (ROOT / "src" / "display_ui.cpp").read_text()
 HEADER = (ROOT / "include" / "screendeck_version.h").read_text()
+UI_FONT = (ROOT / "src" / "ui_font_16_zh.c").read_text()
 GITIGNORE = (ROOT / ".gitignore").read_text()
 PIO = (ROOT / "platformio.ini").read_text()
 RELEASE_WORKFLOW = (ROOT / ".github" / "workflows" / "release.yml").read_text()
@@ -66,7 +67,10 @@ class FirmwareVersionGuards(unittest.TestCase):
         self.assertIn('uiText("固件", "Firmware")', system_settings)
         self.assertIn("SCREENDECK_VERSION", system_settings)
         self.assertIn("SCREENDECK_BUILD_TIME", system_settings)
-        self.assertIn("lv_font_simsun_16_cjk", system_settings)
+        self.assertIn('" / "', system_settings)
+        self.assertNotIn('" · "', system_settings[system_settings.index("firmwarePanel") :])
+        self.assertIn('U+56FA "固"', UI_FONT)
+        self.assertIn('U+4EF6 "件"', UI_FONT)
         self.assertGreater(
             system_settings.index("firmwarePanel"),
             system_settings.index("networkPanel"),

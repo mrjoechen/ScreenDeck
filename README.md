@@ -4,11 +4,16 @@ English | [中文](README_CN.md)
 
 ScreenDeck turns the Guition / Jingcai ESP32-S3-4848S040 into a locally managed, swipeable 480×480 content display.
 
-Flash from a browser, with no desktop software: **https://mrjoechen.github.io/ScreenDeck/**
+Flash from a browser with linked device, with no desktop software: **https://mrjoechen.github.io/ScreenDeck/**
 
 <p>
-  <img src="site/assets/device_preview_01.JPG" alt="ScreenDeck on a desk showing the on-device settings screen" width="240">
-  <img src="site/assets/device_preview_02.JPG" alt="ScreenDeck playing a full-screen image with date and time overlay" width="240">
+  <img src="site/assets/device_preview_01.JPG" alt="ScreenDeck on a desk showing the on-device settings screen" width="30%">
+  <img src="site/assets/device_preview_02.JPG" alt="ScreenDeck playing a full-screen image with date and time overlay" width="30%">
+</p>
+
+<p>
+  <img src="site/assets/device_preview.jpg" alt="ESP32-S3-4848S040 preview" width="30%">
+  <img src="site/assets/device_preview_spec.webp" alt="ESP32-S3-4848S040 specifications" width="30%">
 </p>
 
 ## Features

@@ -2097,18 +2097,14 @@ void renderSystemSettings(lv_obj_t* screen) {
   lv_obj_set_pos(ssidLabel, 16, 39);
 
   lv_obj_t* firmwarePanel = addSettingsPanel(list, 240, 72);
-  const char* firmwareTitle = uiText("固件", "Firmware");
-  const lv_font_t* firmwareTitleFont =
-      containsCjk(firmwareTitle) ? &lv_font_simsun_16_cjk
-                                 : &lv_font_montserrat_14;
   lv_obj_t* firmwareLabel =
-      addLabel(firmwarePanel, firmwareTitle, firmwareTitleFont, 0x93A0A5, 390,
-               LV_TEXT_ALIGN_LEFT);
+      addLabel(firmwarePanel, uiText("固件", "Firmware"),
+               &lv_font_montserrat_14, 0x93A0A5, 390, LV_TEXT_ALIGN_LEFT);
   lv_obj_set_pos(firmwareLabel, 16, 10);
   String firmwareDetail = SCREENDECK_VERSION;
   if (SCREENDECK_BUILD_TIME[0] != '\0' &&
       strcmp(SCREENDECK_BUILD_TIME, "unknown") != 0) {
-    firmwareDetail += " · ";
+    firmwareDetail += " / ";
     firmwareDetail += String(SCREENDECK_BUILD_TIME).substring(0, 10);
   }
   lv_obj_t* firmwareValue =
