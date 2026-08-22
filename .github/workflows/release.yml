@@ -9,6 +9,7 @@ permissions:
   contents: write
   pages: write
   id-token: write
+  deployments: write
 
 concurrency:
   group: pages
@@ -32,7 +33,7 @@ jobs:
           python-version: "3.12"
 
       - name: Cache PlatformIO dependencies
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ~/.cache/pip
@@ -107,9 +108,54 @@ jobs:
         with:
           path: site
 
+  allow-tag-pages-deploy:
+    name: Allow tagged Pages deploys
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      deployments: write
+    steps:
+      - name: Permit v* tags on the github-pages environment
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          repo="${GITHUB_REPOSITORY}"
+          echo "The github-pages environment defaults to the default branch only."
+          echo "This release is a tag, so the policy must also allow v* tags."
+
+          if ! gh api --method PUT "repos/${repo}/environments/github-pages" \
+            --input - <<'JSON'
+          {
+            "prevent_self_review": false,
+            "deployment_branch_policy": {
+              "protected_branches": false,
+              "custom_branch_policies": true
+            }
+          }
+          JSON
+          then
+            echo "::warning::Could not update the github-pages environment with GITHUB_TOKEN. Open Settings → Environments → github-pages → Deployment branches and tags, choose Selected, and add a tag rule for v*."
+            exit 0
+          fi
+
+          existing="$(gh api "repos/${repo}/environments/github-pages/deployment-branch-policies" --jq '.branch_policies[]? | select(.type=="tag") | .name' 2>/dev/null || true)"
+          if echo "${existing}" | grep -Fxq 'v*'; then
+            echo "Tag rule v* is already present."
+            exit 0
+          fi
+
+          gh api --method POST "repos/${repo}/environments/github-pages/deployment-branch-policies" \
+            -f name='v*' \
+            -f type='tag' \
+            || echo "::warning::Could not add tag rule v*. Add it in Settings → Environments → github-pages."
+
   deploy:
     name: Deploy site
-    needs: build
+    needs:
+      - build
+      - allow-tag-pages-deploy
     runs-on: ubuntu-latest
     timeout-minutes: 10
     environment:

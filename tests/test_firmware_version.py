@@ -181,6 +181,8 @@ class FirmwareVersionGuards(unittest.TestCase):
             "merge-web-firmware.sh",
             "gh release create",
             "deploy-pages",
+            "type='tag'",
+            "github-pages",
         ):
             self.assertIn(fragment, RELEASE_WORKFLOW)
         self.assertIn("contents: write", RELEASE_WORKFLOW)

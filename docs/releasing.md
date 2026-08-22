@@ -52,3 +52,14 @@ Tag names should match `v*`, for example `v1.0.0`.
 
 In the repository: **Settings → Pages → Source → GitHub Actions**. The first
 successful tagged run publishes https://mrjoechen.github.io/ScreenDeck/
+
+GitHub creates a `github-pages` environment that, by default, only allows the
+default branch. Tag deploys then fail with “Tag is not allowed to deploy to
+github-pages due to environment protection rules.” The release workflow tries
+to add a `v*` tag rule automatically. If that step cannot change the
+environment, set it once in the UI:
+
+1. Open **Settings → Environments → github-pages**.
+2. Under **Deployment branches and tags**, choose **Selected branches and tags**.
+3. Add a tag rule named `v*`, or choose **No restriction**.
+4. Re-run the failed **Deploy site** job on the same workflow run.
