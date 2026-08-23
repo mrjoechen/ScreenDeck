@@ -238,6 +238,7 @@ void WebPortal::begin(bool provisioningMode) {
     doc["rssi"] = provisioning_ ? 0 : WiFi.RSSI();
     doc["brightness"] = appConfig.brightness();
     doc["language"] = appConfig.languageCode();
+    doc["pageTransition"] = appConfig.pageTransitionStyleCode();
     doc["timezoneOffsetMinutes"] = appConfig.timezoneOffsetMinutes();
     doc["showDateTime"] = appConfig.showDateTime();
     doc["showWeather"] = appConfig.showWeather();
@@ -442,6 +443,31 @@ void WebPortal::begin(bool provisioningMode) {
     sendOk();
   });
 
+  server.on("/api/page-transition", HTTP_POST, []() {
+    const String style = server.arg("pageTransition");
+    if (style != "fade" && style != "slide") {
+      sendLocalizedError(400, "不支持的切换动画",
+                         "Unsupported page animation");
+      return;
+    }
+
+    const PageTransitionStyle previous = appConfig.pageTransitionStyle();
+    displayBeginStorageWrite(false);
+    appConfig.setPageTransitionStyle(style == "slide"
+                                         ? PageTransitionStyle::SlideHorizontal
+                                         : PageTransitionStyle::FadeThroughBlack);
+    const bool saved = appConfig.save();
+    displayEndStorageWrite();
+    if (!saved) {
+      appConfig.setPageTransitionStyle(previous);
+      sendLocalizedError(500, "切换动画保存失败",
+                         "Unable to save the page animation");
+      return;
+    }
+    displayMarkSettingsDirty();
+    sendOk();
+  });
+
   server.on("/api/settings", HTTP_POST, []() {
     const int timezoneOffset = server.arg("timezoneOffsetMinutes").toInt();
     const int screenOffStart = server.arg("screenOffStartMinutes").toInt();
@@ -480,6 +506,18 @@ void WebPortal::begin(bool provisioningMode) {
         static_cast<time_t>(epoch), 0
       };
       settimeofday(&value, nullptr);
+    }
+
+    if (server.hasArg("pageTransition")) {
+      const String style = server.arg("pageTransition");
+      if (style != "fade" && style != "slide") {
+        sendLocalizedError(400, "不支持的切换动画",
+                           "Unsupported page animation");
+        return;
+      }
+      appConfig.setPageTransitionStyle(
+          style == "slide" ? PageTransitionStyle::SlideHorizontal
+                           : PageTransitionStyle::FadeThroughBlack);
     }
 
     displayBeginStorageWrite(false);

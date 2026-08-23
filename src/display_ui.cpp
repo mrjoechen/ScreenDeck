@@ -77,6 +77,8 @@ constexpr uint32_t PAGE_FADE_IN_MS = 1400;
 // 56 Hz refresh rate, 50 ms covers almost three complete scanout frames.
 constexpr uint32_t PAGE_FRAME_SETTLE_MS = 50;
 constexpr uint32_t PAGE_FADE_STEP_MS = 12;
+constexpr uint32_t PAGE_SLIDE_MS = 720;
+constexpr uint32_t PAGE_SLIDE_STEP_MS = 16;
 constexpr uint16_t EASING_SCALE = 1024;
 lv_indev_drv_t inputDriver;
 lv_fs_drv_t fsDriver;
@@ -108,6 +110,7 @@ enum class PageTransitionPhase : uint8_t {
   FadingOut,
   WaitingForFrame,
   FadingIn,
+  Sliding,
 };
 
 enum class PlaybackClockCorner : uint8_t {
@@ -122,6 +125,9 @@ int8_t pageTransitionDirection = 0;
 uint32_t pageTransitionStartedAt = 0;
 uint32_t pageTransitionLastStepAt = 0;
 uint8_t pageTransitionPercent = 100;
+lv_obj_t* pageTransitionTrack = nullptr;
+int16_t pageTransitionSlideFromX = 0;
+int16_t pageTransitionSlideToX = 0;
 uint32_t lastTouchAt = 0;
 size_t resumeContentPage = 1;
 bool deviceSettingsScreen = false;
@@ -276,6 +282,7 @@ enum class SettingsAction : uint8_t {
   SyncTime,
   EditDateTime,
   ToggleClock,
+  CyclePageTransition,
   ToggleWeather,
   ToggleScreenOff,
   EditScreenOffStart,
@@ -385,6 +392,18 @@ uint8_t easedPercent(uint32_t elapsed, uint32_t duration) {
       EASING_SCALE);
 }
 
+int16_t easedCoordinate(int16_t from, int16_t to, uint32_t elapsed,
+                        uint32_t duration) {
+  const uint16_t eased = easeOutCubic(transitionProgress(elapsed, duration));
+  const int32_t delta = static_cast<int32_t>(to) - static_cast<int32_t>(from);
+  const int32_t rounding =
+      delta >= 0 ? static_cast<int32_t>(EASING_SCALE / 2)
+                 : -static_cast<int32_t>(EASING_SCALE / 2);
+  return static_cast<int16_t>(
+      from + (delta * static_cast<int32_t>(eased) + rounding) /
+                 static_cast<int32_t>(EASING_SCALE));
+}
+
 // The panel backlight used to be a bare on/off GPIO, so displaySetBrightness()
 // could only ever drive it fully on and the web controller's brightness slider
 // did nothing. LEDC gives it a real duty cycle.
@@ -426,11 +445,18 @@ void backlightApply() {
 }
 
 void cancelPageTransition() {
+  if (pageTransitionPhase == PageTransitionPhase::Sliding &&
+      pageTransitionTrack) {
+    lv_obj_set_x(pageTransitionTrack, pageTransitionSlideToX);
+  }
   pageTransitionPhase = PageTransitionPhase::Idle;
   pageTransitionDirection = 0;
   pageTransitionStartedAt = 0;
   pageTransitionLastStepAt = 0;
   pageTransitionPercent = 100;
+  pageTransitionTrack = nullptr;
+  pageTransitionSlideFromX = 0;
+  pageTransitionSlideToX = 0;
   backlightApply();
 }
 
@@ -1641,6 +1667,13 @@ void handleSettingsAction(lv_event_t* event) {
     case SettingsAction::ToggleClock:
       appConfig.setShowDateTime(!appConfig.showDateTime());
       break;
+    case SettingsAction::CyclePageTransition:
+      appConfig.setPageTransitionStyle(
+          appConfig.pageTransitionStyle() ==
+                  PageTransitionStyle::FadeThroughBlack
+              ? PageTransitionStyle::SlideHorizontal
+              : PageTransitionStyle::FadeThroughBlack);
+      break;
     case SettingsAction::ToggleWeather:
       appConfig.setShowWeather(!appConfig.showWeather());
       break;
@@ -1725,6 +1758,9 @@ lv_obj_t* addSettingsButton(
       reinterpret_cast<void*>(static_cast<uintptr_t>(action)));
   lv_obj_t* label = addLabel(button, text, labelFont,
                              accent ? 0x101619 : 0xF4EFE6, width - 12);
+  lv_label_set_long_mode(label, LV_LABEL_LONG_CLIP);
+  const lv_font_t* usedFont = lv_obj_get_style_text_font(label, 0);
+  lv_obj_set_height(label, lv_font_get_line_height(usedFont));
   lv_obj_center(label);
   return button;
 }
@@ -1737,10 +1773,10 @@ lv_obj_t* addSettingsButton(
 // showed up as leftover pixels from the previous page. A second swipe inside
 // the 260 ms window, or a web-side content edit landing in it, was enough to
 // hit that. Loading immediately keeps disp->scr_to_load NULL at all times, so
-// the re-entrant path can never be taken. It also avoids animating a
-// full-refresh 480x480 display, where every animation step redraws the whole
-// screen. Content playback smoothness is provided separately by fading the
-// panel backlight through black around this atomic load.
+// the re-entrant path can never be taken. Content playback smoothness is
+// provided separately: either a backlight fade through black, or an in-screen
+// horizontal slide of two already-built pages. Neither path uses
+// lv_scr_load_anim() motion.
 void loadScreen(lv_obj_t* screen) {
   lv_scr_load_anim(screen, LV_SCR_LOAD_ANIM_NONE, 0, 0, true);
 }
@@ -1846,6 +1882,33 @@ lv_obj_t* addSettingsPanel(lv_obj_t* parent, int y, int height = 52) {
   return panel;
 }
 
+constexpr int kSettingsRowInset = 16;
+constexpr int kSettingsRowGap = 8;
+constexpr int kSettingsRowHeight = 52;
+constexpr int kSettingsCompactRowHeight = 48;
+constexpr int kSettingsButtonHeight = 36;
+
+int settingsCenterY(int panelHeight, int contentHeight) {
+  if (contentHeight >= panelHeight) {
+    return 0;
+  }
+  return (panelHeight - contentHeight) / 2;
+}
+
+int settingsButtonY(int panelHeight) {
+  return settingsCenterY(panelHeight, kSettingsButtonHeight);
+}
+
+void placeSettingsText(lv_obj_t* label, int x, int panelHeight,
+                       bool ellipsize = false) {
+  lv_label_set_long_mode(label, ellipsize ? LV_LABEL_LONG_DOT
+                                          : LV_LABEL_LONG_CLIP);
+  const lv_font_t* font = lv_obj_get_style_text_font(label, 0);
+  const int lineHeight = lv_font_get_line_height(font);
+  lv_obj_set_height(label, lineHeight);
+  lv_obj_set_pos(label, x, settingsCenterY(panelHeight, lineHeight));
+}
+
 lv_obj_t* addSettingsRoller(lv_obj_t* parent, const String& options,
                             uint16_t selected, int x, int y, int width,
                             int height, uint8_t visibleRows = 5) {
@@ -1877,12 +1940,16 @@ void styleDangerButton(lv_obj_t* button) {
 }
 
 void renderSettingsHeader(lv_obj_t* screen) {
-  addSettingsButton(screen, uiText("二维码", "QR"), 20, 16, 68, 36,
-                    SettingsAction::Back);
+  lv_obj_t* backButton =
+      addSettingsButton(screen, uiText("二维码", "QR"), 20, 16, 68, 36,
+                        SettingsAction::Back);
   lv_obj_t* title = addLabel(screen, uiText("设备设置", "DEVICE SETTINGS"),
-                             &lv_font_montserrat_20, 0xF4EFE6, 340,
+                             &lv_font_montserrat_20, 0xF4EFE6, 280,
                              LV_TEXT_ALIGN_LEFT);
-  lv_obj_set_pos(title, 108, 22);
+  lv_label_set_long_mode(title, LV_LABEL_LONG_CLIP);
+  const lv_font_t* titleFont = lv_obj_get_style_text_font(title, 0);
+  lv_obj_set_height(title, lv_font_get_line_height(titleFont));
+  lv_obj_align_to(title, backButton, LV_ALIGN_OUT_RIGHT_MID, 20, 0);
 
   addSettingsButton(screen, uiText("显示", "Display"), 20, 64, 138, 38,
                     SettingsAction::ShowDisplay,
@@ -1897,18 +1964,20 @@ void renderSettingsHeader(lv_obj_t* screen) {
 
 void renderDisplaySettings(lv_obj_t* screen) {
   const lv_font_t* settingsRowFont = &lv_font_montserrat_16;
+  constexpr int kRowH = kSettingsCompactRowHeight;
+  const int kBtnY = settingsButtonY(kRowH);
   lv_obj_t* list = addSettingsList(screen);
   int y = 0;
   lv_obj_t* brightnessPanel = addSettingsPanel(list, y, 78);
   lv_obj_t* brightnessLabel =
       addLabel(brightnessPanel, uiText("屏幕亮度", "Brightness"),
                &lv_font_montserrat_14, 0xF4EFE6, 220, LV_TEXT_ALIGN_LEFT);
-  lv_obj_set_pos(brightnessLabel, 16, 10);
+  placeSettingsText(brightnessLabel, 16, 44);
   brightnessValueLabel =
       addLabel(brightnessPanel,
                String(static_cast<unsigned>(appConfig.brightness())) + "%",
                &lv_font_montserrat_20, 0xE7FF54, 80, LV_TEXT_ALIGN_RIGHT);
-  lv_obj_set_pos(brightnessValueLabel, 338, 7);
+  placeSettingsText(brightnessValueLabel, 338, 44);
 
   lv_obj_t* brightnessSlider = lv_slider_create(brightnessPanel);
   lv_obj_set_pos(brightnessSlider, 18, 51);
@@ -1927,16 +1996,30 @@ void renderDisplaySettings(lv_obj_t* screen) {
                       LV_EVENT_ALL, nullptr);
 
   y += 86;
-  lv_obj_t* clockPanel = addSettingsPanel(list, y, 48);
+  const bool slideTransition =
+      appConfig.pageTransitionStyle() == PageTransitionStyle::SlideHorizontal;
+  lv_obj_t* transitionPanel = addSettingsPanel(list, y, kRowH);
+  lv_obj_t* transitionLabel = addLabel(
+      transitionPanel, uiText("切换动画", "Page animation"),
+      &lv_font_montserrat_14, 0xF4EFE6, 270, LV_TEXT_ALIGN_LEFT);
+  placeSettingsText(transitionLabel, 16, kRowH);
+  addSettingsButton(
+      transitionPanel,
+      slideTransition ? uiText("水平滑动", "Slide")
+                      : uiText("淡入淡出", "Fade"),
+      300, kBtnY, 118, 36, SettingsAction::CyclePageTransition, true);
+
+  y += 56;
+  lv_obj_t* clockPanel = addSettingsPanel(list, y, kRowH);
   lv_obj_t* clockLabel = addLabel(
       clockPanel, uiText("页面日期时间", "Date + time on pages"),
-      &lv_font_montserrat_14, 0xF4EFE6, 275, LV_TEXT_ALIGN_LEFT);
-  lv_obj_set_pos(clockLabel, 16, 17);
+      &lv_font_montserrat_14, 0xF4EFE6, 286, LV_TEXT_ALIGN_LEFT);
+  placeSettingsText(clockLabel, 16, kRowH);
   addSettingsButton(
       clockPanel,
       appConfig.showDateTime() ? uiText("开启", "On")
                                : uiText("关闭", "Off"),
-      318, 6, 100, 36, SettingsAction::ToggleClock,
+      318, kBtnY, 100, 36, SettingsAction::ToggleClock,
       appConfig.showDateTime());
 
   y += 56;
@@ -1945,43 +2028,42 @@ void renderDisplaySettings(lv_obj_t* screen) {
   const bool weatherLocated =
       weatherEnabled && weatherGetSnapshot(weatherSnapshot) &&
       weatherSnapshot.location[0] != '\0';
-  lv_obj_t* weatherPanel = addSettingsPanel(list, y, 48);
+  lv_obj_t* weatherPanel = addSettingsPanel(list, y, kRowH);
   const int weatherTitleWidth = weatherEnabled
                                     ? (useChineseUi() ? 96 : 170)
-                                    : 275;
+                                    : 286;
   lv_obj_t* weatherLabel = addLabel(
       weatherPanel, uiText("图片页天气", "Weather on image pages"),
       &lv_font_montserrat_14, 0xF4EFE6, weatherTitleWidth, LV_TEXT_ALIGN_LEFT);
-  lv_obj_set_pos(weatherLabel, 16, 17);
+  placeSettingsText(weatherLabel, 16, kRowH);
   if (weatherEnabled) {
     const char* locationText =
         weatherLocated ? weatherSnapshot.location : uiText("定位中", "Locating");
     const lv_font_t* locationFont = containsCjk(locationText)
                                         ? &lv_font_simsun_16_cjk
                                         : &lv_font_montserrat_14;
+    const int locationX = 16 + weatherTitleWidth + 8;
     lv_obj_t* locationLabel = addLabel(
         weatherPanel, locationText, locationFont, 0x93A0A5,
-        302 - (16 + weatherTitleWidth + 8), LV_TEXT_ALIGN_LEFT);
-    lv_label_set_long_mode(locationLabel, LV_LABEL_LONG_DOT);
-    lv_obj_set_height(locationLabel, 20);
-    lv_obj_set_pos(locationLabel, 16 + weatherTitleWidth + 8, 17);
+        318 - kSettingsRowGap - locationX, LV_TEXT_ALIGN_LEFT);
+    placeSettingsText(locationLabel, locationX, kRowH, true);
   }
   addSettingsButton(
       weatherPanel,
       weatherEnabled ? uiText("开启", "On") : uiText("关闭", "Off"),
-      318, 6, 100, 36, SettingsAction::ToggleWeather, weatherEnabled);
+      318, kBtnY, 100, 36, SettingsAction::ToggleWeather, weatherEnabled);
 
   y += 56;
-  lv_obj_t* screenOffPanel = addSettingsPanel(list, y, 48);
+  lv_obj_t* screenOffPanel = addSettingsPanel(list, y, kRowH);
   lv_obj_t* screenOffLabel = addLabel(
       screenOffPanel, uiText("自动息屏", "Scheduled sleep"), settingsRowFont,
-      0xF4EFE6, 250, LV_TEXT_ALIGN_LEFT);
-  lv_obj_set_pos(screenOffLabel, 16, 17);
+      0xF4EFE6, 286, LV_TEXT_ALIGN_LEFT);
+  placeSettingsText(screenOffLabel, 16, kRowH);
   addSettingsButton(
       screenOffPanel,
       appConfig.screenOffEnabled() ? uiText("开启", "On")
                                    : uiText("关闭", "Off"),
-      318, 6, 100, 36, SettingsAction::ToggleScreenOff,
+      318, kBtnY, 100, 36, SettingsAction::ToggleScreenOff,
       appConfig.screenOffEnabled(), settingsRowFont);
 
   if (appConfig.screenOffEnabled()) {
@@ -1989,8 +2071,8 @@ void renderDisplaySettings(lv_obj_t* screen) {
     lv_obj_t* startPanel = addSettingsPanel(list, y, 48);
     lv_obj_t* startLabel =
         addLabel(startPanel, uiText("息屏时间", "Screen off"), settingsRowFont,
-                 0xF4EFE6, 250, LV_TEXT_ALIGN_LEFT);
-    lv_obj_set_pos(startLabel, 16, 17);
+                 0xF4EFE6, 286, LV_TEXT_ALIGN_LEFT);
+    placeSettingsText(startLabel, 16, kRowH);
     addSettingsButton(startPanel,
                       formatMinuteOfDay(appConfig.screenOffStartMinutes()), 318,
                       6, 100, 36, SettingsAction::EditScreenOffStart, true,
@@ -2000,8 +2082,8 @@ void renderDisplaySettings(lv_obj_t* screen) {
     lv_obj_t* endPanel = addSettingsPanel(list, y, 48);
     lv_obj_t* endLabel =
         addLabel(endPanel, uiText("恢复时间", "Resume at"), settingsRowFont,
-                 0xF4EFE6, 250, LV_TEXT_ALIGN_LEFT);
-    lv_obj_set_pos(endLabel, 16, 17);
+                 0xF4EFE6, 286, LV_TEXT_ALIGN_LEFT);
+    placeSettingsText(endLabel, 16, kRowH);
     addSettingsButton(endPanel,
                       formatMinuteOfDay(appConfig.screenOffEndMinutes()), 318,
                       6, 100, 36, SettingsAction::EditScreenOffEnd, true,
@@ -2018,52 +2100,60 @@ void renderDisplaySettings(lv_obj_t* screen) {
 
 void renderTimeSettings(lv_obj_t* screen) {
   const lv_font_t* settingsRowFont = &lv_font_montserrat_16;
+  constexpr int kRowH = kSettingsRowHeight;
+  const int buttonY = settingsButtonY(kRowH);
   lv_obj_t* list = addSettingsList(screen);
-  lv_obj_t* currentPanel = addSettingsPanel(list, 0, 70);
+  lv_obj_t* currentPanel = addSettingsPanel(list, 0, kRowH);
   liveClockLabel = addLabel(currentPanel, "", &lv_font_montserrat_16,
                             0xE7FF54, 236, LV_TEXT_ALIGN_LEFT);
-  lv_obj_set_pos(liveClockLabel, 16, 25);
-  addSettingsButton(currentPanel, uiText("手动", "Set"), 266, 17, 70, 36,
+  placeSettingsText(liveClockLabel, kSettingsRowInset, kRowH);
+  addSettingsButton(currentPanel, uiText("手动", "Set"), 266, buttonY, 70, 36,
                     SettingsAction::EditDateTime);
-  addSettingsButton(currentPanel, uiText("校时", "Sync"), 348, 17, 70, 36,
+  addSettingsButton(currentPanel, uiText("校时", "Sync"), 348, buttonY, 70, 36,
                     SettingsAction::SyncTime, true);
   updateLiveClock();
 
-  lv_obj_t* timezonePanel = addSettingsPanel(list, 78, 58);
+  lv_obj_t* timezonePanel = addSettingsPanel(list, kRowH + 8, kRowH);
   lv_obj_t* timezoneLabel =
       addLabel(timezonePanel, uiText("时区", "Timezone"), settingsRowFont,
                0xF4EFE6, 80, LV_TEXT_ALIGN_LEFT);
-  lv_obj_set_pos(timezoneLabel, 16, 21);
+  placeSettingsText(timezoneLabel, kSettingsRowInset, kRowH);
   lv_obj_t* timezoneValue =
       addLabel(timezonePanel,
                formatTimezoneOffset(appConfig.timezoneOffsetMinutes()),
-               settingsRowFont, 0xF4EFE6, 165);
-  lv_obj_set_pos(timezoneValue, 108, 16);
-  addSettingsButton(timezonePanel, "-", 286, 11, 60, 36,
+               settingsRowFont, 0xF4EFE6, 165, LV_TEXT_ALIGN_LEFT);
+  placeSettingsText(timezoneValue, 108, kRowH);
+  addSettingsButton(timezonePanel, "-", 286, buttonY, 60, 36,
                     SettingsAction::TimezonePrevious, false, settingsRowFont);
-  addSettingsButton(timezonePanel, "+", 358, 11, 60, 36,
+  addSettingsButton(timezonePanel, "+", 358, buttonY, 60, 36,
                     SettingsAction::TimezoneNext, true, settingsRowFont);
 }
 
 void renderSystemSettings(lv_obj_t* screen) {
+  constexpr int kRowH = kSettingsRowHeight;
+  const int buttonY = settingsButtonY(kRowH);
+  constexpr int kRowStride = kSettingsRowHeight + 8;
   lv_obj_t* list = addSettingsList(screen);
-  lv_obj_t* languagePanel = addSettingsPanel(list, 0, 58);
+  lv_obj_t* languagePanel = addSettingsPanel(list, 0, kRowH);
   lv_obj_t* languageLabel = addLabel(
       languagePanel, uiText("界面语言", "Language"), &lv_font_montserrat_14,
-      0xF4EFE6, 190, LV_TEXT_ALIGN_LEFT);
-  lv_obj_set_pos(languageLabel, 16, 20);
-  addSettingsButton(languagePanel, "中文", 266, 11, 72, 36,
+      0xF4EFE6, 230, LV_TEXT_ALIGN_LEFT);
+  placeSettingsText(languageLabel, kSettingsRowInset, kRowH);
+  addSettingsButton(languagePanel, "中文", 266, buttonY, 72, 36,
                     SettingsAction::SetChinese, useChineseUi());
-  addSettingsButton(languagePanel, "EN", 350, 11, 68, 36,
+  addSettingsButton(languagePanel, "EN", 350, buttonY, 68, 36,
                     SettingsAction::SetEnglish, !useChineseUi());
 
   const bool sdMounted = mediaStoreSdMounted();
   const MediaStoreSdStatus cardStatus = mediaStoreSdStatus();
-  lv_obj_t* sdPanel = addSettingsPanel(list, 66, 86);
+  lv_obj_t* sdPanel = addSettingsPanel(list, kRowStride, kRowH);
+  constexpr int kSdLabelWidth = 86;
+  constexpr int kScanWidth = 88;
+  constexpr int kScanX = 440 - kSettingsRowInset - kScanWidth;
   lv_obj_t* sdLabel =
       addLabel(sdPanel, uiText("TF 卡", "TF card"), &lv_font_montserrat_14,
-               0x93A0A5, 280, LV_TEXT_ALIGN_LEFT);
-  lv_obj_set_pos(sdLabel, 16, 8);
+               0x93A0A5, kSdLabelWidth, LV_TEXT_ALIGN_LEFT);
+  placeSettingsText(sdLabel, kSettingsRowInset, kRowH);
   String sdCapacity = uiText("未找到", "Not detected");
   uint32_t sdCapacityColor = 0xF4EFE6;
   if (sdMounted && cardStatus == MediaStoreSdStatus::Ready) {
@@ -2077,43 +2167,53 @@ void renderSystemSettings(lv_obj_t* screen) {
     sdCapacity = uiText("无法使用", "Unavailable");
     sdCapacityColor = 0xFFB36B;
   }
+  const int sdValueX = kSettingsRowInset + kSdLabelWidth + kSettingsRowGap;
   lv_obj_t* sdCapacityLabel =
-      addLabel(sdPanel, sdCapacity, &lv_font_montserrat_14, sdCapacityColor, 300,
-               LV_TEXT_ALIGN_LEFT);
-  lv_obj_set_pos(sdCapacityLabel, 16, 43);
-  addSettingsButton(sdPanel, uiText("扫描", "Scan"), 330, 24, 88, 38,
-                    SettingsAction::RescanSd, sdMounted);
+      addLabel(sdPanel, sdCapacity, &lv_font_montserrat_14, sdCapacityColor,
+               kScanX - kSettingsRowGap - sdValueX, LV_TEXT_ALIGN_LEFT);
+  placeSettingsText(sdCapacityLabel, sdValueX, kRowH, true);
+  addSettingsButton(sdPanel, uiText("扫描", "Scan"), kScanX, buttonY, kScanWidth,
+                    kSettingsButtonHeight, SettingsAction::RescanSd, sdMounted);
 
-  lv_obj_t* networkPanel = addSettingsPanel(list, 160, 72);
+  lv_obj_t* networkPanel = addSettingsPanel(list, kRowStride * 2, kRowH);
+  constexpr int kWifiLabelWidth = 130;
   lv_obj_t* networkLabel =
       addLabel(networkPanel, uiText("当前 Wi-Fi", "Current Wi-Fi"),
-               &lv_font_montserrat_14, 0x93A0A5, 390, LV_TEXT_ALIGN_LEFT);
-  lv_obj_set_pos(networkLabel, 16, 10);
+               &lv_font_montserrat_14, 0x93A0A5, kWifiLabelWidth,
+               LV_TEXT_ALIGN_LEFT);
+  placeSettingsText(networkLabel, kSettingsRowInset, kRowH);
   const String ssid = WiFi.SSID().isEmpty()
                           ? String(uiText("未连接", "Not connected"))
                           : WiFi.SSID();
+  const int ssidX = kSettingsRowInset + kWifiLabelWidth + kSettingsRowGap;
   lv_obj_t* ssidLabel = addLabel(networkPanel, ssid, &lv_font_montserrat_16,
-                                 0xF4EFE6, 390, LV_TEXT_ALIGN_LEFT);
-  lv_obj_set_pos(ssidLabel, 16, 39);
+                                 0xF4EFE6, 440 - kSettingsRowInset - ssidX,
+                                 LV_TEXT_ALIGN_LEFT);
+  placeSettingsText(ssidLabel, ssidX, kRowH, true);
 
-  lv_obj_t* firmwarePanel = addSettingsPanel(list, 240, 72);
+  lv_obj_t* firmwarePanel = addSettingsPanel(list, kRowStride * 3, kRowH);
+  constexpr int kFirmwareLabelWidth = 96;
   lv_obj_t* firmwareLabel =
       addLabel(firmwarePanel, uiText("固件", "Firmware"),
-               &lv_font_montserrat_14, 0x93A0A5, 390, LV_TEXT_ALIGN_LEFT);
-  lv_obj_set_pos(firmwareLabel, 16, 10);
+               &lv_font_montserrat_14, 0x93A0A5, kFirmwareLabelWidth,
+               LV_TEXT_ALIGN_LEFT);
+  placeSettingsText(firmwareLabel, kSettingsRowInset, kRowH);
   String firmwareDetail = SCREENDECK_VERSION;
   if (SCREENDECK_BUILD_TIME[0] != '\0' &&
       strcmp(SCREENDECK_BUILD_TIME, "unknown") != 0) {
     firmwareDetail += " / ";
     firmwareDetail += String(SCREENDECK_BUILD_TIME).substring(0, 10);
   }
-  lv_obj_t* firmwareValue =
-      addLabel(firmwarePanel, firmwareDetail, &lv_font_montserrat_16, 0xE7FF54,
-               390, LV_TEXT_ALIGN_LEFT);
-  lv_obj_set_pos(firmwareValue, 16, 39);
+  const int firmwareValueX =
+      kSettingsRowInset + kFirmwareLabelWidth + kSettingsRowGap;
+  lv_obj_t* firmwareValue = addLabel(
+      firmwarePanel, firmwareDetail, &lv_font_montserrat_16, 0xE7FF54,
+      440 - kSettingsRowInset - firmwareValueX, LV_TEXT_ALIGN_LEFT);
+  placeSettingsText(firmwareValue, firmwareValueX, kRowH, true);
 
+  const int resetY = kRowStride * 4 + 4;
   lv_obj_t* resetButton = addSettingsButton(
-      list, uiText("清除 Wi-Fi 并重启", "Clear Wi-Fi and restart"), 30, 324,
+      list, uiText("清除 Wi-Fi 并重启", "Clear Wi-Fi and restart"), 30, resetY,
       380, 48, SettingsAction::OpenWifiReset);
   styleDangerButton(resetButton);
   lv_obj_t* warning = addLabel(
@@ -2121,7 +2221,7 @@ void renderSystemSettings(lv_obj_t* screen) {
       uiText("设备重启后会重新显示配网二维码",
              "The setup QR returns after the device restarts"),
       &lv_font_montserrat_14, 0x93A0A5, 400);
-  lv_obj_set_pos(warning, 20, 380);
+  lv_obj_set_pos(warning, 20, resetY + 56);
 }
 
 void renderEditorTitle(lv_obj_t* screen, const String& title,
@@ -2272,11 +2372,8 @@ void renderDeviceSettings() {
   lastClockRefreshAt = millis();
 }
 
-void renderTextPage(const ContentPage& page) {
-  provisioningScreen = false;
-  deviceSettingsScreen = false;
-  lv_obj_t* screen = createScreen(page.background);
-  addCornerMark(screen, page.foreground);
+void populateTextContent(lv_obj_t* parent, const ContentPage& page) {
+  addCornerMark(parent, page.foreground);
 
   const bool hasEmoji = containsEmoji(page.text);
   const String renderedText = hasEmoji ? normalizeEmojiText(page.text) : page.text;
@@ -2294,10 +2391,16 @@ void renderTextPage(const ContentPage& page) {
   }
 
   lv_obj_t* label =
-      addLabel(screen, renderedText, font, page.foreground, 410);
+      addLabel(parent, renderedText, font, page.foreground, 410);
   lv_obj_set_style_text_line_space(label, 10, 0);
   lv_obj_align(label, LV_ALIGN_CENTER, 0, -8);
+}
 
+void renderTextPage(const ContentPage& page) {
+  provisioningScreen = false;
+  deviceSettingsScreen = false;
+  lv_obj_t* screen = createScreen(page.background);
+  populateTextContent(screen, page);
   addPlaybackClock(screen, false, page.foreground);
   loadScreen(screen);
 }
@@ -2518,6 +2621,160 @@ void resumePlayback() {
   lastPageChangeAt = millis();
 }
 
+uint32_t pagePaneBackground(const ContentPage& page) {
+  return page.type == PageType::Image ? 0x050505 : page.background;
+}
+
+void populatePageContent(lv_obj_t* parent, const ContentPage& page) {
+  if (page.type == PageType::Image) {
+    renderStillImage(parent, page);
+    return;
+  }
+  populateTextContent(parent, page);
+}
+
+lv_obj_t* createPagePane(lv_obj_t* track, int16_t x, uint32_t background) {
+  lv_obj_t* pane = lv_obj_create(track);
+  lv_obj_set_pos(pane, x, 0);
+  lv_obj_set_size(pane, SCREEN_WIDTH, SCREEN_HEIGHT);
+  lv_obj_clear_flag(pane, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_set_style_radius(pane, 0, 0);
+  lv_obj_set_style_pad_all(pane, 0, 0);
+  lv_obj_set_style_border_width(pane, 0, 0);
+  lv_obj_set_style_bg_color(pane, lv_color_hex(background), 0);
+  lv_obj_set_style_bg_opa(pane, LV_OPA_COVER, 0);
+  return pane;
+}
+
+bool pageCanUseSlide(size_t pageIndex) {
+  if (pageIndex == 0 || pageIndex > appConfig.pageCount()) {
+    return false;
+  }
+  const ContentPage& page = appConfig.page(pageIndex - 1);
+  if (page.type != PageType::Image) {
+    return true;
+  }
+  if (mediaIsAnimatedPath(page.imagePath) || !mediaExists(page.imagePath)) {
+    return false;
+  }
+  // Sliding composites two decoded frames. GIFs and on-the-fly JPEGs cannot
+  // occupy a cache slot, so those pages keep the backlight fade.
+  return cacheableImagePath(page.imagePath);
+}
+
+bool ensureSlideImageReady(const ContentPage& page) {
+  if (page.type != PageType::Image) {
+    return true;
+  }
+  if (mediaIsAnimatedPath(page.imagePath) || !mediaExists(page.imagePath) ||
+      !cacheableImagePath(page.imagePath)) {
+    return false;
+  }
+  return loadCachedImage(page.imagePath) != nullptr;
+}
+
+void startFadeTransition(int8_t direction, uint32_t startedAt) {
+  pageTransitionDirection = direction > 0 ? 1 : -1;
+  pageTransitionPhase = PageTransitionPhase::FadingOut;
+  pageTransitionStartedAt = startedAt;
+  pageTransitionLastStepAt = startedAt;
+  pageTransitionPercent = 100;
+  pageTransitionTrack = nullptr;
+  backlightApply();
+}
+
+bool startSlideTransition(int8_t direction, uint32_t startedAt) {
+  if (currentPage == 0) {
+    return false;
+  }
+  const size_t incomingPage =
+      findPlayablePage(currentPage, direction, false);
+  if (incomingPage == 0 || !pageCanUseSlide(currentPage) ||
+      !pageCanUseSlide(incomingPage)) {
+    return false;
+  }
+
+  const ContentPage outgoingPage = appConfig.page(currentPage - 1);
+  const ContentPage incomingContent = appConfig.page(incomingPage - 1);
+  // Decode the incoming still while the current page is still on screen. A
+  // cache miss used to abort into a fade, which made the slide setting look
+  // intermittent during the first swipe or a fast skip.
+  if (!ensureSlideImageReady(outgoingPage) ||
+      !ensureSlideImageReady(incomingContent)) {
+    return false;
+  }
+  currentPage = incomingPage;
+  resumeContentPage = currentPage;
+
+  const int8_t normalized = direction > 0 ? 1 : -1;
+  const int16_t fromX = normalized > 0 ? 0 : -SCREEN_WIDTH;
+  const int16_t toX = normalized > 0 ? -SCREEN_WIDTH : 0;
+  const int16_t outgoingX = normalized > 0 ? 0 : SCREEN_WIDTH;
+  const int16_t incomingX = normalized > 0 ? SCREEN_WIDTH : 0;
+
+  provisioningScreen = false;
+  deviceSettingsScreen = false;
+  lv_obj_t* screen = createScreen(0x050505);
+  lv_obj_t* viewport = lv_obj_create(screen);
+  lv_obj_set_pos(viewport, 0, 0);
+  lv_obj_set_size(viewport, SCREEN_WIDTH, SCREEN_HEIGHT);
+  lv_obj_clear_flag(viewport, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_clear_flag(viewport, LV_OBJ_FLAG_OVERFLOW_VISIBLE);
+  lv_obj_set_style_radius(viewport, 0, 0);
+  lv_obj_set_style_pad_all(viewport, 0, 0);
+  lv_obj_set_style_border_width(viewport, 0, 0);
+  lv_obj_set_style_bg_opa(viewport, LV_OPA_TRANSP, 0);
+  lv_obj_t* track = lv_obj_create(viewport);
+  lv_obj_set_size(track, SCREEN_WIDTH * 2, SCREEN_HEIGHT);
+  lv_obj_set_pos(track, fromX, 0);
+  lv_obj_clear_flag(track, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_add_flag(track, LV_OBJ_FLAG_OVERFLOW_VISIBLE);
+  lv_obj_set_style_radius(track, 0, 0);
+  lv_obj_set_style_pad_all(track, 0, 0);
+  lv_obj_set_style_border_width(track, 0, 0);
+  lv_obj_set_style_bg_opa(track, LV_OPA_TRANSP, 0);
+
+  populatePageContent(createPagePane(track, outgoingX,
+                                     pagePaneBackground(outgoingPage)),
+                      outgoingPage);
+  populatePageContent(createPagePane(track, incomingX,
+                                     pagePaneBackground(incomingContent)),
+                      incomingContent);
+  // Keep the date/weather card as a screen overlay so it does not slide away
+  // or get rebuilt (and flash) when the pages settle.
+  const bool incomingImage = incomingContent.type == PageType::Image;
+  addPlaybackClock(screen, incomingImage,
+                   incomingImage ? 0xFFFFFF : incomingContent.foreground);
+  if (playbackClockCard) {
+    lv_obj_move_foreground(playbackClockCard);
+  }
+  loadScreen(screen);
+
+  pageTransitionTrack = track;
+  pageTransitionSlideFromX = fromX;
+  pageTransitionSlideToX = toX;
+  pageTransitionDirection = normalized;
+  pageTransitionPhase = PageTransitionPhase::Sliding;
+  pageTransitionStartedAt = startedAt;
+  pageTransitionLastStepAt = startedAt;
+  pageTransitionPercent = 100;
+  return true;
+}
+
+void finishSlideTransition(uint32_t now) {
+  pageTransitionPhase = PageTransitionPhase::Idle;
+  pageTransitionDirection = 0;
+  pageTransitionStartedAt = 0;
+  pageTransitionLastStepAt = 0;
+  pageTransitionPercent = 100;
+  pageTransitionTrack = nullptr;
+  pageTransitionSlideFromX = 0;
+  pageTransitionSlideToX = 0;
+  lastPageChangeAt = now;
+  // The incoming page and overlay are already on screen. Rebuilding here made
+  // the date/time card vanish and fade back in after every swipe.
+}
+
 void commitPageChange(int8_t direction) {
   const size_t pageCount = appConfig.pageCount();
   if (pageCount == 0) {
@@ -2554,17 +2811,36 @@ void changePage(int8_t direction, uint32_t startedAt) {
   if (pageTransitionPhase != PageTransitionPhase::Idle) {
     return;
   }
-
-  pageTransitionDirection = direction > 0 ? 1 : -1;
-  pageTransitionPhase = PageTransitionPhase::FadingOut;
-  pageTransitionStartedAt = startedAt;
-  pageTransitionLastStepAt = pageTransitionStartedAt;
-  pageTransitionPercent = 100;
-  backlightApply();
+  if (appConfig.pageTransitionStyle() == PageTransitionStyle::SlideHorizontal &&
+      startSlideTransition(direction, startedAt)) {
+    return;
+  }
+  startFadeTransition(direction, startedAt);
 }
 
 void updatePageTransition(uint32_t now) {
   if (pageTransitionPhase == PageTransitionPhase::Idle) {
+    return;
+  }
+
+  if (pageTransitionPhase == PageTransitionPhase::Sliding) {
+    const uint32_t elapsed = now - pageTransitionStartedAt;
+    const bool phaseComplete = elapsed >= PAGE_SLIDE_MS;
+    if (!phaseComplete &&
+        now - pageTransitionLastStepAt < PAGE_SLIDE_STEP_MS) {
+      return;
+    }
+    pageTransitionLastStepAt = now;
+    if (pageTransitionTrack) {
+      lv_obj_set_x(pageTransitionTrack,
+                   phaseComplete ? pageTransitionSlideToX
+                                 : easedCoordinate(pageTransitionSlideFromX,
+                                                   pageTransitionSlideToX,
+                                                   elapsed, PAGE_SLIDE_MS));
+    }
+    if (phaseComplete) {
+      finishSlideTransition(now);
+    }
     return;
   }
 

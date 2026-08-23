@@ -104,14 +104,16 @@ class RgbCorruptionGuards(unittest.TestCase):
             DISPLAY_SOURCE,
             r"bool\s+isImagePage[\s\S]*?page\.type\s*==\s*PageType::Image",
         )
-        safe_animation = re.search(
-            r"lv_scr_load_anim_t\s+safeContentAnimation\([^}]+\}",
-            DISPLAY_SOURCE,
-        )
-        self.assertIsNotNone(safe_animation)
-        self.assertIn("isImagePage(previousPage)", safe_animation.group(0))
-        self.assertIn("isImagePage(currentPage)", safe_animation.group(0))
-        self.assertIn("return LV_SCR_LOAD_ANIM_NONE", safe_animation.group(0))
+        load_screen = function_body(DISPLAY_SOURCE, "void loadScreen(")
+        self.assertIn("LV_SCR_LOAD_ANIM_NONE", load_screen)
+        self.assertNotIn("LV_SCR_LOAD_ANIM_MOVE_LEFT", DISPLAY_SOURCE)
+        self.assertNotIn("LV_SCR_LOAD_ANIM_MOVE_RIGHT", DISPLAY_SOURCE)
+        self.assertIn("PageTransitionPhase::Sliding", DISPLAY_SOURCE)
+        self.assertIn("lv_obj_set_x(pageTransitionTrack", DISPLAY_SOURCE)
+        can_slide = function_body(DISPLAY_SOURCE, "bool pageCanUseSlide(")
+        self.assertIn("mediaIsAnimatedPath(page.imagePath)", can_slide)
+        self.assertIn("cacheableImagePath(page.imagePath)", can_slide)
+        self.assertNotIn("cachedImagePresent(page.imagePath)", can_slide)
 
     def test_upload_buffers_in_psram_before_gated_flash_commit(self) -> None:
         self.assertIn(
@@ -271,6 +273,7 @@ class RgbCorruptionGuards(unittest.TestCase):
             'id="timezoneOffset"',
             'id="showDateTime"',
             'id="showWeather"',
+            'id="pageTransitionSwitch"',
             'id="screenOffEnabled"',
             'id="screenOffStart"',
             'id="screenOffEnd"',
@@ -294,6 +297,7 @@ class RgbCorruptionGuards(unittest.TestCase):
         self.assertIn("lv_slider_set_range(brightnessSlider, 5, 100)", display_settings)
         self.assertIn("appConfig.brightness()", display_settings)
         self.assertIn("SettingsAction::ToggleClock", display_settings)
+        self.assertIn("SettingsAction::CyclePageTransition", display_settings)
         self.assertIn("SettingsAction::ToggleWeather", display_settings)
         for action in (
             "SettingsAction::ToggleScreenOff",
@@ -404,20 +408,29 @@ class RgbCorruptionGuards(unittest.TestCase):
         time_settings = function_body(DISPLAY_SOURCE, "void renderTimeSettings(")
         clock = re.search(
             r"liveClockLabel = addLabel\(currentPanel, \"\", &lv_font_montserrat_16,\s*"
-            r"0xE7FF54, (\d+), LV_TEXT_ALIGN_LEFT\);\s*"
-            r"lv_obj_set_pos\(liveClockLabel, (\d+), (\d+)\);",
+            r"0xE7FF54, (\d+), LV_TEXT_ALIGN_LEFT\);",
+            time_settings,
+        )
+        clock_pos = re.search(
+            r"placeSettingsText\(liveClockLabel, (kSettingsRowInset|\d+),",
             time_settings,
         )
         manual = re.search(
             r"addSettingsButton\(currentPanel, uiText\(\"手动\", \"Set\"\), "
-            r"(\d+), (\d+), (\d+), (\d+),\s*"
+            r"(\d+), (?:\d+|buttonY), (\d+), (\d+),\s*"
             r"SettingsAction::EditDateTime\);",
             time_settings,
         )
         self.assertIsNotNone(clock)
+        self.assertIsNotNone(clock_pos)
         self.assertIsNotNone(manual)
-        clock_width, clock_x, _ = map(int, clock.groups())
-        manual_x, _, _, _ = map(int, manual.groups())
+        clock_width = int(clock.group(1))
+        clock_x = (
+            16
+            if clock_pos.group(1) == "kSettingsRowInset"
+            else int(clock_pos.group(1))
+        )
+        manual_x = int(manual.group(1))
         self.assertGreaterEqual(
             manual_x - (clock_x + clock_width),
             12,
@@ -427,22 +440,22 @@ class RgbCorruptionGuards(unittest.TestCase):
         paired_controls = (
             (
                 function_body(DISPLAY_SOURCE, "void renderSystemSettings("),
-                r"addSettingsButton\(languagePanel, \"中文\", (\d+), \d+, (\d+),",
-                r"addSettingsButton\(languagePanel, \"EN\", (\d+), \d+, (\d+),",
+                r"addSettingsButton\(languagePanel, \"中文\", (\d+), (?:\d+|buttonY), (\d+),",
+                r"addSettingsButton\(languagePanel, \"EN\", (\d+), (?:\d+|buttonY), (\d+),",
                 "language buttons",
             ),
             (
                 time_settings,
                 r"addSettingsButton\(currentPanel, uiText\(\"手动\", \"Set\"\), "
-                r"(\d+), \d+, (\d+),",
+                r"(\d+), (?:\d+|buttonY), (\d+),",
                 r"addSettingsButton\(currentPanel, uiText\(\"校时\", \"Sync\"\), "
-                r"(\d+), \d+, (\d+),",
+                r"(\d+), (?:\d+|buttonY), (\d+),",
                 "time action buttons",
             ),
             (
                 time_settings,
-                r"addSettingsButton\(timezonePanel, \"-\", (\d+), \d+, (\d+),",
-                r"addSettingsButton\(timezonePanel, \"\+\", (\d+), \d+, (\d+),",
+                r"addSettingsButton\(timezonePanel, \"-\", (\d+), (?:\d+|buttonY), (\d+),",
+                r"addSettingsButton\(timezonePanel, \"\+\", (\d+), (?:\d+|buttonY), (\d+),",
                 "timezone buttons",
             ),
         )

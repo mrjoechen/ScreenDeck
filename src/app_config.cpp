@@ -29,6 +29,7 @@ bool AppConfig::begin() {
 bool AppConfig::load() {
   brightness_ = 80;
   language_ = InterfaceLanguage::Chinese;
+  pageTransitionStyle_ = PageTransitionStyle::FadeThroughBlack;
   timezoneOffsetMinutes_ = 480;
   showDateTime_ = false;
   showWeather_ = false;
@@ -61,6 +62,10 @@ bool AppConfig::load() {
   const String language = doc["language"] | "zh";
   language_ = language == "en" ? InterfaceLanguage::English
                                 : InterfaceLanguage::Chinese;
+  const String pageTransition = doc["pageTransition"] | "fade";
+  pageTransitionStyle_ = pageTransition == "slide"
+                             ? PageTransitionStyle::SlideHorizontal
+                             : PageTransitionStyle::FadeThroughBlack;
   timezoneOffsetMinutes_ =
       constrain(doc["timezoneOffsetMinutes"] | 480, -720, 840);
   showDateTime_ = doc["showDateTime"] | false;
@@ -121,6 +126,7 @@ bool AppConfig::save() const {
   doc["version"] = 1;
   doc["brightness"] = brightness_;
   doc["language"] = languageCode();
+  doc["pageTransition"] = pageTransitionStyleCode();
   doc["timezoneOffsetMinutes"] = timezoneOffsetMinutes_;
   doc["showDateTime"] = showDateTime_;
   doc["showWeather"] = showWeather_;

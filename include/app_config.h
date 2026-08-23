@@ -14,6 +14,11 @@ enum class InterfaceLanguage : uint8_t {
   English,
 };
 
+enum class PageTransitionStyle : uint8_t {
+  FadeThroughBlack,
+  SlideHorizontal,
+};
+
 struct ContentPage {
   uint32_t id = 0;
   PageType type = PageType::Text;
@@ -37,6 +42,16 @@ class AppConfig {
     return language_ == InterfaceLanguage::English ? "en" : "zh";
   }
   void setLanguage(InterfaceLanguage language) { language_ = language; }
+
+  PageTransitionStyle pageTransitionStyle() const { return pageTransitionStyle_; }
+  const char* pageTransitionStyleCode() const {
+    return pageTransitionStyle_ == PageTransitionStyle::SlideHorizontal
+               ? "slide"
+               : "fade";
+  }
+  void setPageTransitionStyle(PageTransitionStyle style) {
+    pageTransitionStyle_ = style;
+  }
 
   int16_t timezoneOffsetMinutes() const { return timezoneOffsetMinutes_; }
   void setTimezoneOffsetMinutes(int16_t minutes);
@@ -66,6 +81,8 @@ class AppConfig {
 
   uint8_t brightness_ = 80;
   InterfaceLanguage language_ = InterfaceLanguage::Chinese;
+  PageTransitionStyle pageTransitionStyle_ =
+      PageTransitionStyle::FadeThroughBlack;
   int16_t timezoneOffsetMinutes_ = 480;
   bool showDateTime_ = false;
   bool showWeather_ = false;
