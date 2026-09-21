@@ -165,17 +165,27 @@
           <div class="workbench__main">
             <div class="workbench__title-row">
               <h3 data-i18n="chooseDevice">选择设备</h3>
-              <span id="registryState" class="registry-state" aria-live="polite" data-i18n="registryLoading">读取型号清单…</span>
+              <div class="workbench__title-tools">
+                <span id="registryState" class="registry-state" aria-live="polite" data-i18n="noDevicesFound">暂未发现可用设备</span>
+                <button
+                  id="refreshDevices"
+                  class="button button--quiet button--compact"
+                  type="button"
+                  data-i18n="refreshDevices"
+                  data-i18n-aria="refreshDevicesAria"
+                >
+                  刷新设备
+                </button>
+              </div>
             </div>
 
             <div
               id="deviceList"
               class="device-picker"
-              role="radiogroup"
-              aria-label="支持的设备型号"
+              aria-label="已连接的设备"
               data-i18n-aria="deviceListAria"
             >
-              <div class="device-picker__loading" aria-hidden="true"></div>
+              <div class="device-picker__empty" data-i18n="noDevicesFound">暂未发现可用设备</div>
             </div>
 
             <label class="confirm-line" for="deviceConfirm">
@@ -205,8 +215,8 @@
                   浏览器只允许在 HTTPS 或 localhost 页面刷写设备。GitHub Pages 部署后会自动满足 HTTPS 条件。
                 </p>
               </esp-web-install-button>
-              <p id="installHelper" class="install-helper" aria-live="polite" data-i18n="helperSelect">
-                先选择已支持的型号，并完成上方确认。
+              <p id="installHelper" class="install-helper" aria-live="polite" data-i18n="helperNoDevice">
+                连接设备后，点击刷新设备。首次授权时浏览器会弹出串口选择窗口。
               </p>
             </div>
 

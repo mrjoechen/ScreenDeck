@@ -7,11 +7,13 @@
 #include <WebServer.h>
 #include <WiFi.h>
 #include <esp_heap_caps.h>
+#include <esp_random.h>
 #include <sys/time.h>
 #include <time.h>
 
 #include "app_config.h"
 #include "display_ui.h"
+#include "llm_narration.h"
 #include "media_store.h"
 #include "raw_image.h"
 #include "screendeck_version.h"
@@ -31,6 +33,8 @@ String uploadPath;
 bool uploadValid = false;
 size_t uploadBytes = 0;
 bool uploadDisplayPaused = false;
+char llmSettingsToken[17] = "";
+uint32_t llmConfigRevision = 1;
 
 void releaseUploadBuffer() {
   if (!uploadBuffer) {
@@ -68,6 +72,7 @@ bool commitUploadBuffer() {
 
 void sendJson(int status, const String& body) {
   server.sendHeader("Cache-Control", "no-store");
+  server.sendHeader("X-Content-Type-Options", "nosniff");
   server.send(status, "application/json; charset=utf-8", body);
 }
 
@@ -211,12 +216,42 @@ bool isSafeSdPath(const String& path) {
   return mediaIsSdPath(path) && path.indexOf("..") < 0 &&
          mediaIsSupportedExtension(path);
 }
+
+bool containsWhitespaceOrControl(const String& value) {
+  for (size_t index = 0; index < value.length(); ++index) {
+    if (static_cast<uint8_t>(value[index]) <= 0x20) {
+      return true;
+    }
+  }
+  return false;
+}
+
+class ScopedStringWipe {
+ public:
+  explicit ScopedStringWipe(String& value) : value_(value) {}
+  ~ScopedStringWipe() {
+    volatile char* bytes = value_.begin();
+    for (size_t index = 0; bytes && index < value_.length(); ++index) {
+      bytes[index] = '\0';
+    }
+    value_.remove(0);
+  }
+
+  ScopedStringWipe(const ScopedStringWipe&) = delete;
+  ScopedStringWipe& operator=(const ScopedStringWipe&) = delete;
+
+ private:
+  String& value_;
+};
 }  // namespace
 
 WebPortal webPortal;
 
 void WebPortal::begin(bool provisioningMode) {
   provisioning_ = provisioningMode;
+  snprintf(llmSettingsToken, sizeof(llmSettingsToken), "%08X%08X",
+           static_cast<unsigned>(esp_random()),
+           static_cast<unsigned>(esp_random()));
 
   server.on("/", HTTP_GET, []() {
     server.send_P(200, "text/html; charset=utf-8", WEB_UI_HTML);
@@ -224,7 +259,8 @@ void WebPortal::begin(bool provisioningMode) {
 
   server.on("/api/status", HTTP_GET, [this]() {
     mediaStoreEnsureSdMounted();
-    DynamicJsonDocument doc(1536);
+    // Include the full UTF-8 prompt as well as the existing status fields.
+    DynamicJsonDocument doc(4096 + MAX_LLM_NARRATION_PROMPT_BYTES);
     doc["ok"] = true;
     doc["mode"] = provisioning_ ? "provisioning" : "online";
     doc["firmwareVersion"] = SCREENDECK_VERSION;
@@ -245,6 +281,14 @@ void WebPortal::begin(bool provisioningMode) {
     doc["screenOffEnabled"] = appConfig.screenOffEnabled();
     doc["screenOffStartMinutes"] = appConfig.screenOffStartMinutes();
     doc["screenOffEndMinutes"] = appConfig.screenOffEndMinutes();
+    doc["llmBaseUrl"] = appConfig.llmBaseUrl();
+    doc["llmModel"] = appConfig.llmModel();
+    doc["llmNarrationPrompt"] = appConfig.llmNarrationPrompt();
+    doc["llmApiKeyConfigured"] = !appConfig.llmApiKey().isEmpty();
+    doc["llmConfigured"] = appConfig.llmConfigured();
+    doc["imageNarrationEnabled"] = appConfig.imageNarrationEnabled();
+    doc["llmSettingsToken"] = llmSettingsToken;
+    doc["llmConfigRevision"] = llmConfigRevision;
     doc["epoch"] = static_cast<uint64_t>(time(nullptr));
     doc["storageTotal"] = LittleFS.totalBytes();
     doc["storageUsed"] = LittleFS.usedBytes();
@@ -285,6 +329,11 @@ void WebPortal::begin(bool provisioningMode) {
   });
 
   server.on("/api/pages/delete", HTTP_POST, []() {
+    if (llmNarrationMediaReadInProgress()) {
+      sendLocalizedError(409, "正在读取图片生成旁白，请稍后再试",
+                         "An image is being prepared for narration; try again shortly");
+      return;
+    }
     displayBeginStorageWrite(false);
     const bool removed = appConfig.removePage(server.arg("id").toInt());
     displayEndStorageWrite();
@@ -468,6 +517,326 @@ void WebPortal::begin(bool provisioningMode) {
     sendOk();
   });
 
+  server.on("/api/llm", HTTP_POST, []() {
+    if (server.arg("csrfToken") != llmSettingsToken) {
+      sendLocalizedError(403, "设置页面已过期，请刷新后重试",
+                         "The settings page expired; refresh and try again");
+      return;
+    }
+    const String previousBaseUrl = appConfig.llmBaseUrl();
+    String previousApiKey = appConfig.llmApiKey();
+    const String previousModel = appConfig.llmModel();
+    const String previousNarrationPrompt = appConfig.llmNarrationPrompt();
+    ScopedStringWipe previousApiKeyWipe(previousApiKey);
+
+    String baseUrl;
+    String apiKey;
+    String model;
+    String narrationPrompt = previousNarrationPrompt;
+    ScopedStringWipe apiKeyWipe(apiKey);
+    if (server.arg("clear") != "1") {
+      baseUrl = server.arg("baseUrl");
+      apiKey = server.arg("apiKey");
+      model = server.arg("model");
+      if (server.hasArg("narrationPrompt")) {
+        narrationPrompt = server.arg("narrationPrompt");
+      }
+      baseUrl.trim();
+      model.trim();
+      narrationPrompt.trim();
+      while (baseUrl.endsWith("/")) {
+        baseUrl.remove(baseUrl.length() - 1);
+      }
+      if (apiKey.isEmpty()) {
+        if (baseUrl != previousBaseUrl || model != previousModel) {
+          sendLocalizedError(
+              400, "修改 Base URL 或模型时必须重新输入 API Key",
+              "Re-enter the API key when changing the Base URL or model");
+          return;
+        }
+        apiKey = previousApiKey;
+      }
+      const bool validUrl =
+          baseUrl.startsWith("https://") ||
+          (baseUrl.startsWith("http://") &&
+           server.arg("allowInsecureHttp") == "1");
+      if (!validUrl || baseUrl.length() >= MAX_LLM_BASE_URL_BYTES ||
+          apiKey.isEmpty() || apiKey.length() >= MAX_LLM_API_KEY_BYTES ||
+          model.isEmpty() || model.length() >= MAX_LLM_MODEL_BYTES ||
+          containsWhitespaceOrControl(baseUrl) ||
+          containsWhitespaceOrControl(apiKey) ||
+          containsWhitespaceOrControl(model)) {
+        sendLocalizedError(
+            400,
+            "LLM 配置无效，请填写 http(s) Base URL、API Key 和模型",
+            "Invalid LLM settings; enter an HTTP(S) Base URL, API key, and model");
+        return;
+      }
+      if (!validLlmNarrationPrompt(narrationPrompt)) {
+        sendLocalizedError(
+            400, "图片摘要提示词不能为空或过长",
+            "The image summary prompt cannot be empty or too long");
+        return;
+      }
+    }
+
+    displayBeginStorageWrite(false);
+    bool changed = false;
+    if (server.arg("clear") == "1") {
+      appConfig.clearLlmConfig();
+      changed = true;
+    } else {
+      changed = appConfig.setLlmConfig(baseUrl, apiKey, model);
+      changed = changed && appConfig.setLlmNarrationPrompt(narrationPrompt);
+    }
+    const bool saved = changed && appConfig.save();
+    displayEndStorageWrite();
+    if (!saved) {
+      // Restore the complete in-memory snapshot if the single persistence
+      // write fails. clearLlmConfig also resets the prompt before restoration.
+      appConfig.clearLlmConfig();
+      if (!previousBaseUrl.isEmpty() && !previousApiKey.isEmpty() &&
+          !previousModel.isEmpty()) {
+        appConfig.setLlmConfig(previousBaseUrl, previousApiKey, previousModel);
+      }
+      appConfig.setLlmNarrationPrompt(previousNarrationPrompt);
+      sendLocalizedError(500, "LLM 设置保存失败",
+                         "Unable to save the LLM settings");
+      return;
+    }
+    displayMarkContentDirty();
+    ++llmConfigRevision;
+    if (llmConfigRevision == 0) {
+      llmConfigRevision = 1;
+    }
+    DynamicJsonDocument doc(128);
+    doc["ok"] = true;
+    doc["llmConfigRevision"] = llmConfigRevision;
+    String body;
+    serializeJson(doc, body);
+    sendJson(200, body);
+  });
+
+  server.on("/api/llm/test", HTTP_POST, []() {
+    if (server.arg("csrfToken") != llmSettingsToken) {
+      sendLocalizedError(403, "设置页面已过期，请刷新后重试",
+                         "The settings page expired; refresh and try again");
+      return;
+    }
+
+    const String requestToken = server.arg("requestToken");
+    if (!llmConfigTestRequestTokenValid(requestToken.c_str())) {
+      sendLocalizedError(400, "测试请求标识无效，请重新测试",
+                         "Invalid test request identifier; run the test again");
+      return;
+    }
+
+    // Treat an exact token replay as the same request. This keeps a retried
+    // POST from creating another job after the first response was lost.
+    LlmConfigTestStatus existingStatus;
+    if (llmNarrationTestStatusByRequestToken(requestToken, existingStatus)) {
+      DynamicJsonDocument doc(256);
+      doc["ok"] = true;
+      doc["id"] = existingStatus.id;
+      doc["state"] = llmConfigTestStateCode(existingStatus.state);
+      doc["reason"] = llmConfigTestFailureCode(existingStatus.failure);
+      doc["httpStatus"] = existingStatus.httpStatus;
+      String body;
+      serializeJson(doc, body);
+      sendJson(200, body);
+      return;
+    }
+
+    // A test deliberately uses the form's current values without changing the
+    // saved triple. An omitted key can only refer to the stored secret while
+    // the public parts of that triple remain unchanged.
+    const String previousBaseUrl = appConfig.llmBaseUrl();
+    String previousApiKey = appConfig.llmApiKey();
+    const String previousModel = appConfig.llmModel();
+    const String previousNarrationPrompt = appConfig.llmNarrationPrompt();
+    ScopedStringWipe previousApiKeyWipe(previousApiKey);
+    String baseUrl = server.arg("baseUrl");
+    String apiKey = server.arg("apiKey");
+    String model = server.arg("model");
+    String narrationPrompt = previousNarrationPrompt;
+    if (server.hasArg("narrationPrompt")) {
+      narrationPrompt = server.arg("narrationPrompt");
+    }
+    ScopedStringWipe apiKeyWipe(apiKey);
+    baseUrl.trim();
+    model.trim();
+    narrationPrompt.trim();
+    while (baseUrl.endsWith("/")) {
+      baseUrl.remove(baseUrl.length() - 1);
+    }
+    if (apiKey.isEmpty()) {
+      if (baseUrl != previousBaseUrl || model != previousModel) {
+        sendLocalizedError(
+            400, "修改 Base URL 或模型时必须重新输入 API Key",
+            "Re-enter the API key when changing the Base URL or model");
+        return;
+      }
+      apiKey = previousApiKey;
+    }
+
+    const bool validUrl =
+        baseUrl.startsWith("https://") ||
+        (baseUrl.startsWith("http://") &&
+         server.arg("allowInsecureHttp") == "1");
+    if (!validUrl || baseUrl.length() >= MAX_LLM_BASE_URL_BYTES ||
+        apiKey.isEmpty() || apiKey.length() >= MAX_LLM_API_KEY_BYTES ||
+        model.isEmpty() || model.length() >= MAX_LLM_MODEL_BYTES ||
+        containsWhitespaceOrControl(baseUrl) ||
+        containsWhitespaceOrControl(apiKey) ||
+        containsWhitespaceOrControl(model)) {
+      sendLocalizedError(
+          400, "LLM 配置无效，请填写 http(s) Base URL、API Key 和模型",
+          "Invalid LLM settings; enter an HTTP(S) Base URL, API key, and model");
+      return;
+    }
+    if (!validLlmNarrationPrompt(narrationPrompt)) {
+      sendLocalizedError(
+          400, "图片摘要提示词不能为空或过长",
+          "The image summary prompt cannot be empty or too long");
+      return;
+    }
+
+    if (llmNarrationTestBusy()) {
+      sendLocalizedError(409, "已有 LLM 配置测试正在进行，请稍候",
+                         "An LLM configuration test is already in progress");
+      return;
+    }
+    uint32_t testId = 0;
+    if (!llmNarrationTestStart(baseUrl, apiKey, model, narrationPrompt,
+                               requestToken, testId)) {
+      sendLocalizedError(503, "设备暂时无法启动 LLM 配置测试，请稍后重试",
+                         "The device cannot start the LLM configuration test; try again shortly");
+      return;
+    }
+
+    DynamicJsonDocument doc(192);
+    doc["ok"] = true;
+    doc["id"] = testId;
+    doc["state"] = llmConfigTestStateCode(LlmConfigTestState::Queued);
+    String body;
+    serializeJson(doc, body);
+    sendJson(202, body);
+  });
+
+  server.on("/api/llm/test", HTTP_GET, []() {
+    const String requestToken = server.arg("requestToken");
+    const String idArgument = server.arg("id");
+    const bool tokenQuery = !requestToken.isEmpty();
+    const bool validToken =
+        tokenQuery && llmConfigTestRequestTokenValid(requestToken.c_str());
+    bool validId = !idArgument.isEmpty();
+    for (size_t index = 0; validId && index < idArgument.length(); ++index) {
+      validId = idArgument[index] >= '0' && idArgument[index] <= '9';
+    }
+    char* idEnd = nullptr;
+    const uint64_t parsedId =
+        validId ? strtoull(idArgument.c_str(), &idEnd, 10) : 0;
+    validId = validId && idEnd && *idEnd == '\0' && parsedId != 0 &&
+              parsedId <= UINT32_MAX;
+    const uint32_t testId = static_cast<uint32_t>(parsedId);
+
+    LlmConfigTestStatus status;
+    bool available = false;
+    if (validToken) {
+      available =
+          llmNarrationTestStatusByRequestToken(requestToken, status);
+      if (available && !idArgument.isEmpty()) {
+        available = validId && status.id == testId;
+      }
+    } else if (!tokenQuery && validId) {
+      available = llmNarrationTestStatus(testId, status);
+    }
+
+    if (!available) {
+      // Keep polling failures inside the same fixed, non-sensitive schema.
+      status.id = !tokenQuery && validId ? testId : 0;
+      status.state = LlmConfigTestState::Failed;
+      status.failure = LlmConfigTestFailure::Internal;
+      status.httpStatus = 0;
+      DynamicJsonDocument doc(256);
+      doc["ok"] = false;
+      doc["id"] = status.id;
+      doc["state"] = llmConfigTestStateCode(status.state);
+      doc["reason"] = llmConfigTestFailureCode(status.failure);
+      doc["httpStatus"] = status.httpStatus;
+      String body;
+      serializeJson(doc, body);
+      sendJson(tokenQuery && !validToken ? 400 : 404, body);
+      return;
+    }
+
+    DynamicJsonDocument doc(256);
+    doc["ok"] = true;
+    doc["id"] = status.id;
+    doc["state"] = llmConfigTestStateCode(status.state);
+    doc["reason"] = llmConfigTestFailureCode(status.failure);
+    doc["httpStatus"] = status.httpStatus;
+    String body;
+    serializeJson(doc, body);
+    sendJson(200, body);
+  });
+
+  server.on("/api/llm/narration", HTTP_POST, []() {
+    if (server.arg("csrfToken") != llmSettingsToken) {
+      sendLocalizedError(403, "设置页面已过期，请刷新后重试",
+                         "The settings page expired; refresh and try again");
+      return;
+    }
+
+    const String enabledArgument = server.arg("enabled");
+    if (enabledArgument != "0" && enabledArgument != "1") {
+      sendLocalizedError(400, "图片摘要开关值无效",
+                         "Invalid image summary setting");
+      return;
+    }
+
+    const bool previous = appConfig.imageNarrationEnabled();
+    const bool enabled = enabledArgument == "1";
+    displayBeginStorageWrite(false);
+    appConfig.setImageNarrationEnabled(enabled);
+    const bool saved = appConfig.save();
+    displayEndStorageWrite();
+    if (!saved) {
+      appConfig.setImageNarrationEnabled(previous);
+      sendLocalizedError(500, "图片摘要设置保存失败",
+                         "Unable to save the image summary setting");
+      return;
+    }
+    displayMarkContentDirty();
+    sendOk();
+  });
+
+  server.on("/api/llm/narration/reset", HTTP_POST, []() {
+    if (server.arg("csrfToken") != llmSettingsToken) {
+      sendLocalizedError(403, "设置页面已过期，请刷新后重试",
+                         "The settings page expired; refresh and try again");
+      return;
+    }
+    if (server.arg("confirmed") != "1") {
+      sendLocalizedError(400, "请先确认重置所有图片摘要",
+                         "Confirm resetting all image summaries first");
+      return;
+    }
+    displayBeginStorageWrite(false);
+    const bool saved = appConfig.clearImageNarrations();
+    if (saved) {
+      llmNarrationInvalidateAll();
+    }
+    displayEndStorageWrite();
+    if (!saved) {
+      sendLocalizedError(500, "图片摘要重置失败，原摘要已保留",
+                         "Unable to reset image summaries; the cache was kept");
+      return;
+    }
+    displayMarkContentDirty();
+    sendOk();
+  });
+
   server.on("/api/settings", HTTP_POST, []() {
     const int timezoneOffset = server.arg("timezoneOffsetMinutes").toInt();
     const int screenOffStart = server.arg("screenOffStartMinutes").toInt();
@@ -554,6 +923,11 @@ void WebPortal::begin(bool provisioningMode) {
   });
 
   server.on("/api/sd/rescan", HTTP_POST, []() {
+    if (llmNarrationMediaReadInProgress()) {
+      sendLocalizedError(409, "正在读取卡内图片生成旁白，请稍后再试",
+                         "A card image is being prepared for narration; try again shortly");
+      return;
+    }
     // Playback may be holding a file open on the card being remounted.
     displayReleaseMedia();
     mediaStoreUnmountSd();

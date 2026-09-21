@@ -13,6 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SITE = ROOT / "site"
 INDEX = (SITE / "index.html").read_text()
 SITE_JS = (SITE / "assets" / "site.js").read_text()
+SITE_CSS = (SITE / "assets" / "site.css").read_text()
 WORKFLOW = (ROOT / ".github" / "workflows" / "release.yml").read_text()
 MERGE = (ROOT / "tools" / "merge-web-firmware.sh").read_text()
 
@@ -131,6 +132,32 @@ class LandingPageGuards(unittest.TestCase):
         self.assertIn("../firmware/release.json", SITE_JS)
         self.assertIn("updateReleaseLine", SITE_JS)
         self.assertIn("channelRelease", SITE_JS)
+
+    def test_flash_station_lists_connected_ports_instead_of_catalog_models(self) -> None:
+        self.assertIn('id="refreshDevices"', INDEX)
+        self.assertIn('data-i18n="refreshDevices"', INDEX)
+        self.assertIn("刷新设备", INDEX)
+        self.assertIn('data-i18n="noDevicesFound">暂未发现可用设备', INDEX)
+        self.assertIn('class="device-picker__empty"', INDEX)
+        self.assertNotIn("1 个可用型号", INDEX)
+        self.assertNotIn("modelsAvailable", SITE_JS)
+        self.assertNotIn("createComingSoonOption", SITE_JS)
+        self.assertNotIn("availableDevices.map(createDeviceOption)", SITE_JS)
+
+        for fragment in (
+            "navigator.serial.getPorts",
+            "navigator.serial.requestPort",
+            "noDevicesFound",
+            "modelSupported",
+            "modelUnsupported",
+            "0x303a",
+        ):
+            self.assertIn(fragment, SITE_JS)
+
+        self.assertIn("border-radius: var(--radius-md)", SITE_CSS)
+        selected_rule = SITE_CSS.split(".device-option:has(input:checked)")[1].split("}")[0]
+        self.assertIn("border-radius: var(--radius-md)", selected_rule)
+        self.assertIn("background: var(--color-accent-wash)", selected_rule)
 
     def test_deploy_workflow_rebuilds_and_merges_the_current_firmware(self) -> None:
         self.assertIn('tags:', WORKFLOW)

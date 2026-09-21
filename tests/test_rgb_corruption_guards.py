@@ -17,13 +17,16 @@ DISPLAY_STACK_SOURCE = (ROOT / "src" / "esp_display_stack.cpp").read_text()
 WEB_SOURCE = (ROOT / "src" / "web_portal.cpp").read_text()
 WEB_HEADER = (ROOT / "include" / "web_portal.h").read_text()
 DISPLAY_HEADER = (ROOT / "include" / "display_ui.h").read_text()
+OVERLAY_PRESENTATION_HEADER = (
+    ROOT / "include" / "playback_overlay_presentation.h"
+).read_text()
 DISPLAY_STACK_HEADER = (ROOT / "include" / "esp_display_stack.h").read_text()
 WEB_UI_SOURCE = (ROOT / "include" / "web_ui.h").read_text()
 RAW_IMAGE_SOURCE = (ROOT / "src" / "raw_image.cpp").read_text() if (ROOT / "src" / "raw_image.cpp").exists() else ""
 APP_CONFIG_SOURCE = (ROOT / "src" / "app_config.cpp").read_text()
 APP_CONFIG_HEADER = (ROOT / "include" / "app_config.h").read_text()
 MAIN_SOURCE = (ROOT / "src" / "main.cpp").read_text()
-UI_FONT_SOURCE = (ROOT / "src" / "ui_font_16_zh.c").read_text()
+UI_FONT_SOURCE = (ROOT / "src" / "ui_font_misans_16.c").read_text()
 EMOJI_FONT_PATH = ROOT / "src" / "ui_font_emoji_32.c"
 EMOJI_FONT_SOURCE = EMOJI_FONT_PATH.read_text() if EMOJI_FONT_PATH.exists() else ""
 PLATFORMIO_CONFIG = (ROOT / "platformio.ini").read_text()
@@ -58,7 +61,7 @@ class RgbCorruptionGuards(unittest.TestCase):
         ):
             self.assertIn(component, IDF_MANIFEST)
 
-    def test_panel_uses_bounded_rgb_bandwidth_and_dram_bounce_buffers(self) -> None:
+    def test_panel_uses_normal_refresh_clock_and_dram_bounce_buffers(self) -> None:
         self.assertRegex(DISPLAY_STACK_SOURCE, r"RGB_BOUNCE_BUFFER_LINES\s*=\s*20")
         self.assertIn(
             "rgbConfig.bounce_buffer_size_px = RGB_BOUNCE_BUFFER_PIXELS",
@@ -68,10 +71,10 @@ class RgbCorruptionGuards(unittest.TestCase):
             r"RGB_PIXEL_CLOCK_HZ\s*=\s*(\d+)", DISPLAY_STACK_SOURCE
         )
         self.assertIsNotNone(pclk)
-        self.assertLessEqual(
+        self.assertEqual(
             int(pclk.group(1)),
-            6_000_000,
-            "the RGB pixel clock leaves too little external-memory headroom",
+            16_000_000,
+            "the 548 x 518 timing requires the validated 56 Hz panel clock",
         )
 
     def test_lvgl_uses_official_triple_full_anti_tearing(self) -> None:
@@ -109,7 +112,8 @@ class RgbCorruptionGuards(unittest.TestCase):
         self.assertNotIn("LV_SCR_LOAD_ANIM_MOVE_LEFT", DISPLAY_SOURCE)
         self.assertNotIn("LV_SCR_LOAD_ANIM_MOVE_RIGHT", DISPLAY_SOURCE)
         self.assertIn("PageTransitionPhase::Sliding", DISPLAY_SOURCE)
-        self.assertIn("lv_obj_set_x(pageTransitionTrack", DISPLAY_SOURCE)
+        self.assertIn("applySlideShift(", DISPLAY_SOURCE)
+        self.assertIn("lv_obj_set_x(pageTransitionOutgoing", DISPLAY_SOURCE)
         can_slide = function_body(DISPLAY_SOURCE, "bool pageCanUseSlide(")
         self.assertIn("mediaIsAnimatedPath(page.imagePath)", can_slide)
         self.assertIn("cacheableImagePath(page.imagePath)", can_slide)
@@ -154,12 +158,13 @@ class RgbCorruptionGuards(unittest.TestCase):
             WEB_UI_SOURCE,
             r"Math\.max\(480/image\.naturalWidth,480/image\.naturalHeight\)",
         )
-        render_image = re.search(
-            r"void\s+renderImagePage\([^}]+\{(?P<body>[\s\S]*?)\n\}",
-            DISPLAY_SOURCE,
-        )
-        self.assertIsNotNone(render_image)
-        self.assertIn("max<uint32_t>(zoomX, zoomY)", render_image.group("body"))
+        render_still = function_body(DISPLAY_SOURCE, "void renderStillImage(")
+        self.assertIn("max<uint32_t>(zoomX, zoomY)", render_still)
+
+        render_image = function_body(DISPLAY_SOURCE, "void renderImagePage(")
+        self.assertIn("renderStillImage(screen, page)", render_image)
+        populate_page = function_body(DISPLAY_SOURCE, "void populatePageContent(")
+        self.assertIn("renderStillImage(parent, page)", populate_page)
 
     def test_browser_preconverts_uploads_to_rgb565(self) -> None:
         self.assertIn('name:stem+".rgb565"', WEB_UI_SOURCE)
@@ -190,46 +195,92 @@ class RgbCorruptionGuards(unittest.TestCase):
     def test_display_caches_current_and_adjacent_images_in_psram(self) -> None:
         self.assertRegex(DISPLAY_SOURCE, r"IMAGE_CACHE_SLOTS\s*=\s*3")
         self.assertIn("MALLOC_CAP_SPIRAM", DISPLAY_SOURCE)
-        self.assertIn("preloadImageWindow(currentPage)", DISPLAY_SOURCE)
+        self.assertIn("preloadOneNeighbourImage(currentPage)", DISPLAY_SOURCE)
         self.assertIn("lv_img_decoder_open", DISPLAY_SOURCE)
         self.assertIn("lv_img_set_src(image, &cached->descriptor)", DISPLAY_SOURCE)
 
-    def test_pages_auto_advance_every_five_seconds(self) -> None:
+    def test_pages_auto_advance_after_their_configured_dwell(self) -> None:
         self.assertRegex(
             DISPLAY_SOURCE,
             r"AUTO_ADVANCE_INTERVAL_MS\s*=\s*5000",
         )
+        dwell = function_body(DISPLAY_SOURCE, "uint32_t currentPageDwellMs(")
+        self.assertIn("AUTO_ADVANCE_INTERVAL_MS", dwell)
+        self.assertIn("ANIMATED_ADVANCE_INTERVAL_MS", dwell)
+
         display_loop = function_body(DISPLAY_SOURCE, "void displayLoop()")
-        self.assertIn("now - lastPageChangeAt >= AUTO_ADVANCE_INTERVAL_MS", display_loop)
-        self.assertIn("changePage(1)", display_loop)
+        self.assertIn(
+            "now - lastPageChangeAt >= currentPageDwellMs()", display_loop
+        )
+        self.assertIn("queuedDirection = 1", display_loop)
+        self.assertIn("changePage(queuedDirection, now)", display_loop)
+        self.assertIn("changePage(queuedDirection, millis())", display_loop)
         self.assertIn("pendingSwipe", display_loop)
         self.assertIn("!contentWasRendered", display_loop)
-        change_page = function_body(DISPLAY_SOURCE, "void changePage(")
-        self.assertIn("lastPageChangeAt = millis()", change_page)
 
-    def test_qr_page_is_only_default_or_opened_from_top_edge(self) -> None:
+        finish_slide = function_body(
+            DISPLAY_SOURCE, "void finishSlideTransition("
+        )
+        update_transition = function_body(
+            DISPLAY_SOURCE, "void updatePageTransition("
+        )
+        self.assertIn("lastPageChangeAt = now", finish_slide)
+        self.assertIn("lastPageChangeAt = now", update_transition)
+
+    def test_qr_page_is_only_default_or_opened_from_device_settings(self) -> None:
         self.assertRegex(
             DISPLAY_SOURCE,
             r"SYSTEM_PAGE_IDLE_TIMEOUT_MS\s*=\s*10000",
         )
         read_touch = function_body(DISPLAY_SOURCE, "void readTouch(")
-        self.assertIn("touchStartY <= TOP_EDGE_SWIPE_ZONE", read_touch)
-        self.assertIn("pendingSystemPage = true", read_touch)
+        self.assertIn("dy > SWIPE_THRESHOLD", read_touch)
+        self.assertIn(
+            "pendingScreenRequest = ScreenRequest::DeviceSettings", read_touch
+        )
+        self.assertNotIn("touchStartY <= TOP_EDGE_SWIPE_ZONE", read_touch)
+
+        settings_action = function_body(
+            DISPLAY_SOURCE, "void handleSettingsAction("
+        )
+        self.assertIn("action == SettingsAction::Back", settings_action)
+        self.assertIn(
+            "pendingScreenRequest = ScreenRequest::SystemPage", settings_action
+        )
 
         show_content = function_body(DISPLAY_SOURCE, "void displayShowContent(")
         self.assertIn("appConfig.pageCount() == 0", show_content)
         self.assertIn("currentPage = 1", show_content)
 
-        change_page = function_body(DISPLAY_SOURCE, "void changePage(")
-        self.assertIn("const size_t pageCount = appConfig.pageCount()", change_page)
-        self.assertIn("currentPage = 1", change_page)
-        self.assertNotIn("% total", change_page)
+        commit_page = function_body(DISPLAY_SOURCE, "void commitPageChange(")
+        self.assertIn("const size_t pageCount = appConfig.pageCount()", commit_page)
+        self.assertIn("currentPage = 1", commit_page)
+        self.assertNotIn("% total", commit_page)
 
         display_loop = function_body(DISPLAY_SOURCE, "void displayLoop()")
-        self.assertIn("pendingSystemPage", display_loop)
-        self.assertIn("showSystemPage()", display_loop)
-        self.assertIn("resumePlayback()", display_loop)
-        self.assertIn("SYSTEM_PAGE_IDLE_TIMEOUT_MS", display_loop)
+        request_start = display_loop.index(
+            "if (pendingScreenRequest != ScreenRequest::None)"
+        )
+        request_end = display_loop.index("if (deviceSettingsDirty", request_start)
+        request_branch = display_loop[request_start:request_end]
+        self.assertIn("renderDeviceSettings()", request_branch)
+        self.assertIn("showSystemPage()", request_branch)
+        self.assertNotIn("renderSystemPage()", request_branch)
+
+        show_system = function_body(DISPLAY_SOURCE, "void showSystemPage(")
+        self.assertIn(
+            "resumeContentPage = min(currentPage, pageCount)", show_system
+        )
+        self.assertIn("currentPage = 0", show_system)
+
+        timeout_start = display_loop.index(
+            "appConfig.pageCount() > 0 && currentPage == 0"
+        )
+        timeout_end = display_loop.index("contentWasRendered = true", timeout_start)
+        system_timeout = display_loop[timeout_start:timeout_end]
+        self.assertIn(
+            "now - lastTouchAt >= SYSTEM_PAGE_IDLE_TIMEOUT_MS", system_timeout
+        )
+        self.assertIn("resumePlayback()", system_timeout)
 
     def test_time_overlay_and_screen_off_settings_are_synchronized(self) -> None:
         for key in (
@@ -273,6 +324,7 @@ class RgbCorruptionGuards(unittest.TestCase):
             'id="timezoneOffset"',
             'id="showDateTime"',
             'id="showWeather"',
+            'id="imageNarrationEnabled"',
             'id="pageTransitionSwitch"',
             'id="screenOffEnabled"',
             'id="screenOffStart"',
@@ -299,6 +351,7 @@ class RgbCorruptionGuards(unittest.TestCase):
         self.assertIn("SettingsAction::ToggleClock", display_settings)
         self.assertIn("SettingsAction::CyclePageTransition", display_settings)
         self.assertIn("SettingsAction::ToggleWeather", display_settings)
+        self.assertIn("SettingsAction::ToggleImageNarration", display_settings)
         for action in (
             "SettingsAction::ToggleScreenOff",
             "SettingsAction::EditScreenOffStart",
@@ -407,7 +460,7 @@ class RgbCorruptionGuards(unittest.TestCase):
     def test_device_settings_layout_keeps_controls_separated(self) -> None:
         time_settings = function_body(DISPLAY_SOURCE, "void renderTimeSettings(")
         clock = re.search(
-            r"liveClockLabel = addLabel\(currentPanel, \"\", &lv_font_montserrat_16,\s*"
+            r"liveClockLabel = addLabel\(currentPanel, \"\", &ui_font_misans_16,\s*"
             r"0xE7FF54, (\d+), LV_TEXT_ALIGN_LEFT\);",
             time_settings,
         )
@@ -490,7 +543,7 @@ class RgbCorruptionGuards(unittest.TestCase):
         display_settings = function_body(DISPLAY_SOURCE, "void renderDisplaySettings(")
         time_settings = function_body(DISPLAY_SOURCE, "void renderTimeSettings(")
         self.assertIn(
-            "const lv_font_t* settingsRowFont = &lv_font_montserrat_16;",
+            "const lv_font_t* settingsRowFont = &ui_font_misans_16;",
             display_settings,
         )
         for label in ("自动息屏", "息屏时间", "恢复时间"):
@@ -605,39 +658,31 @@ class RgbCorruptionGuards(unittest.TestCase):
             self.assertIn(
                 f'U+{ord(character):04X} "{character}"',
                 UI_FONT_SOURCE,
-                f"localized device glyph {character} is missing from ui_font_16_zh",
+                f"localized device glyph {character} is missing from ui_font_misans_16",
             )
 
-    def test_text_pages_resolve_common_emoji_through_font_fallback(self) -> None:
-        self.assertIn("LV_FONT_DECLARE(ui_font_emoji_32)", (ROOT / "include" / "ui_font.h").read_text())
+    def test_device_uses_misans_with_emoji_supplement(self) -> None:
+        self.assertNotIn("lv_font_montserrat", DISPLAY_SOURCE)
+        self.assertNotIn("lv_font_simsun", DISPLAY_SOURCE)
+        self.assertTrue(EMOJI_FONT_PATH.exists())
         self.assertIn("containsEmoji(page.text)", DISPLAY_SOURCE)
         self.assertIn("font = &ui_font_emoji_32", DISPLAY_SOURCE)
-        self.assertRegex(
-            EMOJI_FONT_SOURCE,
-            r"\.fallback\s*=\s*&lv_font_simsun_16_cjk",
-        )
-
-        self.assertIn("codepoint == 0x20E3", DISPLAY_SOURCE)
-        for codepoint, emoji in (
-            (0x20E3, "⃣"),
-            (0x2764, "❤"),
-            (0x1F44D, "👍"),
-            (0x1F600, "😀"),
-            (0x1F680, "🚀"),
-        ):
-            self.assertIn(
-                f'U+{codepoint:04X} "{emoji}"',
-                EMOJI_FONT_SOURCE,
-                f"common emoji {emoji} is missing from the embedded emoji font",
-            )
-
-        self.assertIn("0xFE0F", DISPLAY_SOURCE)
-        self.assertIn("0x200D", DISPLAY_SOURCE)
+        self.assertIn("font != &ui_font_emoji_32", DISPLAY_SOURCE)
+        self.assertIn("codepoint == 0xFE0F || codepoint == 0x200D", DISPLAY_SOURCE)
+        self.assertRegex(EMOJI_FONT_SOURCE,
+                         r"\.fallback\s*=\s*&ui_font_misans_16")
+        self.assertNotIn("lv_font_simsun", EMOJI_FONT_SOURCE)
+        self.assertIn("MiSans / Xiaomi", DISPLAY_SOURCE)
+        encoded = {int(value, 16) for value in re.findall(
+            r'U\+([0-9A-Fa-f]{4,6})\s+"', UI_FONT_SOURCE)}
+        self.assertTrue(set(range(0x20, 0x7F)).issubset(encoded))
+        for unsupported in "あア한αЯ😀":
+            self.assertNotIn(ord(unsupported), encoded)
 
     def test_scheduled_screen_off_supports_double_tap_temporary_wake(self) -> None:
         self.assertRegex(
             DISPLAY_SOURCE,
-            r"TEMPORARY_WAKE_DURATION_MS\s*=\s*15000",
+            r"TEMPORARY_WAKE_IDLE_MS\s*=\s*30000",
         )
         read_touch = function_body(DISPLAY_SOURCE, "void readTouch(")
         self.assertIn("touchBeganWhileBlanked", read_touch)
@@ -646,8 +691,14 @@ class RgbCorruptionGuards(unittest.TestCase):
 
         register_tap = function_body(DISPLAY_SOURCE, "void registerBlankedTap(")
         self.assertIn("wakeOverrideUntil", register_tap)
-        self.assertIn("TEMPORARY_WAKE_DURATION_MS", register_tap)
+        self.assertIn("TEMPORARY_WAKE_IDLE_MS", register_tap)
         self.assertIn("refreshScheduledBacklight()", register_tap)
+
+        note_activity = function_body(DISPLAY_SOURCE, "void noteWakeActivity(")
+        self.assertIn(
+            "wakeOverrideUntil = now + TEMPORARY_WAKE_IDLE_MS", note_activity
+        )
+        self.assertIn("noteWakeActivity", read_touch)
 
         refresh_backlight = function_body(
             DISPLAY_SOURCE, "void refreshScheduledBacklight()"
@@ -657,7 +708,16 @@ class RgbCorruptionGuards(unittest.TestCase):
 
     def test_playback_clock_stacks_larger_shadowed_text_without_background(self) -> None:
         playback_clock = function_body(DISPLAY_SOURCE, "void addPlaybackClock(")
-        self.assertIn("lv_obj_set_size(card, 184, 104)", playback_clock)
+        self.assertIn(
+            "lv_obj_set_size(card, presentation.width, presentation.height)",
+            playback_clock,
+        )
+        self.assertIn(
+            "presentation.width = 184", OVERLAY_PRESENTATION_HEADER
+        )
+        self.assertIn(
+            "presentation.height = 104", OVERLAY_PRESENTATION_HEADER
+        )
         self.assertIn(
             "lv_obj_set_style_bg_opa(card, LV_OPA_TRANSP, 0)", playback_clock
         )
@@ -667,8 +727,8 @@ class RgbCorruptionGuards(unittest.TestCase):
         )
         self.assertIn("playbackDateShadowLabel", playback_clock)
         self.assertIn("playbackTimeShadowLabel", playback_clock)
-        self.assertIn("&lv_font_montserrat_24", playback_clock)
-        self.assertIn("&lv_font_montserrat_48", playback_clock)
+        self.assertIn("&ui_font_misans_24", playback_clock)
+        self.assertIn("&ui_font_misans_48", playback_clock)
         self.assertGreaterEqual(playback_clock.count("0x000000"), 2)
         self.assertGreaterEqual(playback_clock.count("LV_OPA_50"), 2)
         for size in (
@@ -697,12 +757,12 @@ class RgbCorruptionGuards(unittest.TestCase):
         update_clock = function_body(DISPLAY_SOURCE, "void updateLiveClock()")
         self.assertIn('strftime(date, sizeof(date), "%Y-%m-%d"', update_clock)
         self.assertIn('strftime(clock, sizeof(clock), "%H:%M"', update_clock)
-        self.assertIn("&lv_font_montserrat_24", update_clock)
-        self.assertIn("&lv_font_montserrat_48", update_clock)
+        self.assertIn("&ui_font_misans_24", update_clock)
+        self.assertIn("&ui_font_misans_48", update_clock)
         self.assertIn("playbackDateShadowLabel", update_clock)
         self.assertIn("playbackTimeShadowLabel", update_clock)
-        self.assertIn("CONFIG_LV_FONT_MONTSERRAT_48=y", SDKCONFIG_DEFAULTS)
-        self.assertIn("CONFIG_LV_FONT_MONTSERRAT_48=y", SDKCONFIG_TARGET)
+        self.assertNotIn("CONFIG_LV_FONT_MONTSERRAT_48=y", SDKCONFIG_DEFAULTS)
+        self.assertNotIn("CONFIG_LV_FONT_MONTSERRAT_48=y", SDKCONFIG_TARGET)
         self.assertIn(
             "width:184px;height:104px;padding:8px 0 0;background:transparent",
             WEB_UI_SOURCE,
@@ -862,9 +922,11 @@ class RgbCorruptionGuards(unittest.TestCase):
             move, display_loop.index("preloadOneNeighbourImage(currentPage)")
         )
         self.assertGreater(move, display_loop.index("backlightResumeAt = 0"))
-        self.assertIn(
-            "if (!contentWasRendered) {\n    updatePlaybackClockPosition(millis());",
+        self.assertIn("updatePlaybackClockPosition(millis())", display_loop)
+        self.assertRegex(
             display_loop,
+            r"if \(!contentWasRendered && !warmBeforeChange\) \{\s*"
+            r"updatePlaybackClockPosition\(millis\(\)\);",
         )
         self.assertIn(
             "初始随机位于四角之一，此后每分钟在左上、右上、左下、右下间移动",
@@ -892,10 +954,19 @@ class RgbCorruptionGuards(unittest.TestCase):
         self.assertIn("LvglLockGuard", display_loop)
 
         storage_write = function_body(
-            DISPLAY_SOURCE, "void displayBeginStorageWrite()"
+            DISPLAY_SOURCE, "void displayBeginStorageWrite("
         )
-        self.assertIn("digitalWrite(BACKLIGHT_PIN, LOW)", storage_write)
+        self.assertIn("if (blankBacklight)", storage_write)
+        self.assertIn("storageBlankActive = true", storage_write)
+        self.assertIn("backlightApply()", storage_write)
         self.assertIn("espDisplayStackPause()", storage_write)
+
+        backlight = function_body(DISPLAY_SOURCE, "void backlightApply()")
+        self.assertIn(
+            "storageBlankActive || backlightResumeAt != 0", backlight
+        )
+        self.assertIn("forcedOff ? 0", backlight)
+        self.assertIn("ledcWrite(BACKLIGHT_PIN, duty)", backlight)
         storage_end = function_body(
             DISPLAY_SOURCE, "void displayEndStorageWrite()"
         )

@@ -21,6 +21,7 @@ void displayReleaseMedia();
 void displayBeginStorageWrite(bool blankBacklight = true);
 void displayEndStorageWrite();
 void displayLoop();
+bool displaySlideInProgress();
 bool displayTakeSdRescanRequest();
 bool displayTakeWifiResetRequest();
 void displayReportWifiResetFailure();

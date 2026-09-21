@@ -15,7 +15,7 @@ MEDIA_SOURCE = (ROOT / "src" / "media_store.cpp").read_text()
 MEDIA_HEADER = (ROOT / "include" / "media_store.h").read_text()
 WEB_SOURCE = (ROOT / "src" / "web_portal.cpp").read_text()
 WEB_UI_SOURCE = (ROOT / "include" / "web_ui.h").read_text()
-UI_FONT_SOURCE = (ROOT / "src" / "ui_font_16_zh.c").read_text()
+UI_FONT_SOURCE = (ROOT / "src" / "ui_font_misans_16.c").read_text()
 
 
 def function_body(source: str, signature: str) -> str:

@@ -23,6 +23,7 @@
   --color-grid-strong: oklch(95% 0.018 85 / 0.1);
   --color-accent-wash: oklch(94% 0.19 112 / 0.09);
   --color-danger-wash: oklch(72% 0.19 30 / 0.1);
+  --color-success-wash: oklch(90% 0.16 130 / 0.12);
   --color-scrim: oklch(12% 0.012 200 / 0.72);
 
   --font-display: "Big Shoulders Display", "Avenir Next Condensed", "PingFang SC", sans-serif;

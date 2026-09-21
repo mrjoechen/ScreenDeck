@@ -13,7 +13,11 @@
 #include "app_config.h"
 #include "backlight_fade.h"
 #include "esp_display_stack.h"
+#include "llm_narration.h"
+#include "image_narration_gesture.h"
 #include "media_store.h"
+#include "narration_icon.h"
+#include "playback_overlay_presentation.h"
 #include "raw_image.h"
 #include "screendeck_version.h"
 #include "ui_font.h"
@@ -69,8 +73,8 @@ constexpr size_t IMAGE_CACHE_SLOTS = 3;
 // image may be read from flash, and the minimum gap between two such reads.
 // Both stay well inside AUTO_ADVANCE_INTERVAL_MS so the next page is cached
 // before playback needs it.
-constexpr uint32_t IMAGE_PRELOAD_IDLE_DELAY_MS = 400;
-constexpr uint32_t IMAGE_PRELOAD_MIN_INTERVAL_MS = 250;
+constexpr uint32_t IMAGE_PRELOAD_IDLE_DELAY_MS = 80;
+constexpr uint32_t IMAGE_PRELOAD_MIN_INTERVAL_MS = 50;
 constexpr uint32_t PAGE_FADE_OUT_MS = 600;
 constexpr uint32_t PAGE_FADE_IN_MS = 1400;
 // Keep the backlight fully off after forcing the new LVGL frame. At the panel's
@@ -78,7 +82,7 @@ constexpr uint32_t PAGE_FADE_IN_MS = 1400;
 constexpr uint32_t PAGE_FRAME_SETTLE_MS = 50;
 constexpr uint32_t PAGE_FADE_STEP_MS = 12;
 constexpr uint32_t PAGE_SLIDE_MS = 720;
-constexpr uint32_t PAGE_SLIDE_STEP_MS = 16;
+constexpr uint32_t PAGE_SLIDE_STEP_MS = 18;
 constexpr uint16_t EASING_SCALE = 1024;
 lv_indev_drv_t inputDriver;
 lv_fs_drv_t fsDriver;
@@ -100,7 +104,14 @@ int16_t touchStartX = 0;
 int16_t touchStartY = 0;
 int16_t lastTouchX = 0;
 int16_t lastTouchY = 0;
+ImageNarrationGesture narrationGesture;
+uint32_t touchNarrationPageId = 0;
+uint32_t pendingNarrationPageId = 0;
+bool touchMovedForNarration = false;
+uint32_t lastNarrationCheckAt = 0;
+uint32_t lastNarrationStatusAt = 0;
 int8_t pendingSwipe = 0;
+int8_t lastPlaybackDirection = 1;
 bool pendingSystemPage = false;
 uint32_t lastSwipeAt = 0;
 uint32_t lastPageChangeAt = 0;
@@ -125,7 +136,9 @@ int8_t pageTransitionDirection = 0;
 uint32_t pageTransitionStartedAt = 0;
 uint32_t pageTransitionLastStepAt = 0;
 uint8_t pageTransitionPercent = 100;
-lv_obj_t* pageTransitionTrack = nullptr;
+lv_obj_t* playbackContentPane = nullptr;
+lv_obj_t* pageTransitionOutgoing = nullptr;
+lv_obj_t* pageTransitionIncoming = nullptr;
 int16_t pageTransitionSlideFromX = 0;
 int16_t pageTransitionSlideToX = 0;
 uint32_t lastTouchAt = 0;
@@ -146,6 +159,10 @@ uint32_t lastClockRefreshAt = 0;
 PlaybackClockCorner playbackClockCorner = PlaybackClockCorner::BottomRight;
 uint32_t playbackClockLastMoveAt = 0;
 bool playbackClockMoveTimerStarted = false;
+bool imageNarrationVisible = false;
+bool slideIncomingNarrationVisible = false;
+PlaybackOverlayPresentation currentPlaybackOverlayPresentation;
+bool playbackOverlayPresentationValid = false;
 lv_obj_t* liveClockLabel = nullptr;
 lv_obj_t* playbackClockCard = nullptr;
 lv_obj_t* playbackDateShadowLabel = nullptr;
@@ -208,7 +225,8 @@ uint32_t lastPreloadAt = 0;
 
 bool isImagePage(size_t pageIndex);
 bool isPlayablePage(size_t pageIndex);
-bool containsUtf8(const String& text);
+size_t adjacentPage(size_t pageIndex, int8_t direction, size_t pageCount);
+void settleSlidePanes();
 bool containsCjk(const String& text);
 bool containsEmoji(const String& text);
 String normalizeEmojiText(const String& text);
@@ -284,6 +302,7 @@ enum class SettingsAction : uint8_t {
   ToggleClock,
   CyclePageTransition,
   ToggleWeather,
+  ToggleImageNarration,
   ToggleScreenOff,
   EditScreenOffStart,
   EditScreenOffEnd,
@@ -445,16 +464,14 @@ void backlightApply() {
 }
 
 void cancelPageTransition() {
-  if (pageTransitionPhase == PageTransitionPhase::Sliding &&
-      pageTransitionTrack) {
-    lv_obj_set_x(pageTransitionTrack, pageTransitionSlideToX);
+  if (pageTransitionPhase == PageTransitionPhase::Sliding) {
+    settleSlidePanes();
   }
   pageTransitionPhase = PageTransitionPhase::Idle;
   pageTransitionDirection = 0;
   pageTransitionStartedAt = 0;
   pageTransitionLastStepAt = 0;
   pageTransitionPercent = 100;
-  pageTransitionTrack = nullptr;
   pageTransitionSlideFromX = 0;
   pageTransitionSlideToX = 0;
   backlightApply();
@@ -527,7 +544,7 @@ void applyClockLabel(lv_obj_t* label, String& cache, const String& text,
     return;
   }
   const lv_font_t* selectedFont =
-      containsCjk(text) ? &ui_font_16_zh : asciiFont;
+      containsCjk(text) ? &ui_font_misans_16 : asciiFont;
   if (shadowLabel) {
     lv_obj_set_style_text_font(shadowLabel, selectedFont, 0);
     lv_label_set_text(shadowLabel, text.c_str());
@@ -546,12 +563,12 @@ void updateLiveClock() {
   if (!getConfiguredLocalTime(localTime)) {
     applyClockLabel(liveClockLabel, liveClockText,
                     uiText("等待校时", "Waiting for time"),
-                    &lv_font_montserrat_20);
+                    &ui_font_misans_20);
     applyClockLabel(playbackDateLabel, playbackDateText,
-                    uiText("等待校时", "Time sync"), &lv_font_montserrat_24,
+                    uiText("等待校时", "Time sync"), &ui_font_misans_24,
                     playbackDateShadowLabel);
     applyClockLabel(playbackTimeLabel, playbackTimeText, "--:--",
-                    &lv_font_montserrat_48, playbackTimeShadowLabel);
+                    &ui_font_misans_48, playbackTimeShadowLabel);
     return;
   }
 
@@ -560,17 +577,17 @@ void updateLiveClock() {
   char output[32];
   strftime(output, sizeof(output), "%Y-%m-%d  %H:%M", &localTime);
   applyClockLabel(liveClockLabel, liveClockText, output,
-                  &lv_font_montserrat_20);
+                  &ui_font_misans_20);
 
   char date[16];
   strftime(date, sizeof(date), "%Y-%m-%d", &localTime);
   applyClockLabel(playbackDateLabel, playbackDateText, date,
-                  &lv_font_montserrat_24, playbackDateShadowLabel);
+                  &ui_font_misans_24, playbackDateShadowLabel);
 
   char clock[8];
   strftime(clock, sizeof(clock), "%H:%M", &localTime);
   applyClockLabel(playbackTimeLabel, playbackTimeText, clock,
-                  &lv_font_montserrat_48, playbackTimeShadowLabel);
+                  &ui_font_misans_48, playbackTimeShadowLabel);
 }
 
 String withLeadingSlash(const char* path) {
@@ -764,8 +781,11 @@ size_t nextImagePreloadPage(size_t centerPage) {
   if (centerPage == 0 || centerPage > pageCount) {
     centerPage = min(resumeContentPage, pageCount);
   }
-  const size_t neighbours[] = {centerPage >= pageCount ? 1 : centerPage + 1,
-                               centerPage <= 1 ? pageCount : centerPage - 1};
+  const int8_t firstDir = lastPlaybackDirection < 0 ? -1 : 1;
+  const size_t neighbours[] = {
+      adjacentPage(centerPage, firstDir, pageCount),
+      adjacentPage(centerPage, -firstDir, pageCount),
+  };
   for (const size_t pageIndex : neighbours) {
     if (pageIndex == centerPage || !isImagePage(pageIndex)) {
       continue;
@@ -794,6 +814,53 @@ void updateTouchState() {
   touchPressed = espDisplayStackReadTouch(touchX, touchY);
 }
 
+uint32_t narrationGesturePageId() {
+  if (provisioningScreen || deviceSettingsScreen || scheduledScreenOff ||
+      storageWriteActive || contentDirty || pendingSwipe != 0 ||
+      pendingScreenRequest != ScreenRequest::None ||
+      pageTransitionPhase != PageTransitionPhase::Idle || currentPage == 0 ||
+      currentPage > appConfig.pageCount() ||
+      !appConfig.imageNarrationEnabled() || !appConfig.llmConfigured()) {
+    return 0;
+  }
+  const ContentPage& page = appConfig.page(currentPage - 1);
+  return page.type == PageType::Image ? page.id : 0;
+}
+
+// USER_1 marks narration containers. Look up the live object tree instead of
+// retaining a card pointer that becomes stale when pages/panes are rebuilt.
+bool narrationHitTest(lv_obj_t* obj, const lv_point_t& point) {
+  if (!obj || lv_obj_has_flag(obj, LV_OBJ_FLAG_HIDDEN)) {
+    return false;
+  }
+  lv_area_t bounds;
+  lv_obj_get_coords(obj, &bounds);
+  if (point.x < bounds.x1 || point.x > bounds.x2 ||
+      point.y < bounds.y1 || point.y > bounds.y2) {
+    return false;
+  }
+  if (lv_obj_has_flag(obj, LV_OBJ_FLAG_USER_1)) {
+    return true;
+  }
+  for (uint32_t i = 0; i < lv_obj_get_child_cnt(obj); ++i) {
+    if (narrationHitTest(lv_obj_get_child(obj, i), point)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+uint32_t narrationGestureHitPageId(int16_t x, int16_t y) {
+  const uint32_t pageId = narrationGesturePageId();
+  if (pageId == 0) {
+    return 0;
+  }
+  lv_obj_t* screen = lv_scr_act();
+  lv_obj_update_layout(screen);
+  const lv_point_t point{x, y};
+  return narrationHitTest(screen, point) ? pageId : 0;
+}
+
 void readTouch(lv_indev_drv_t*, lv_indev_data_t* data) {
   updateTouchState();
   if (touchPressed) {
@@ -807,7 +874,12 @@ void readTouch(lv_indev_drv_t*, lv_indev_data_t* data) {
       touchStartAt = millis();
       touchStartX = x;
       touchStartY = y;
+      touchNarrationPageId = narrationGestureHitPageId(x, y);
+      touchMovedForNarration = false;
     }
+    touchMovedForNarration = touchMovedForNarration ||
+        abs(x - touchStartX) > TAP_MAX_MOVEMENT ||
+        abs(y - touchStartY) > TAP_MAX_MOVEMENT;
     data->state = touchBeganWhileBlanked ? LV_INDEV_STATE_RELEASED
                                          : LV_INDEV_STATE_PRESSED;
     data->point.x = x;
@@ -835,10 +907,21 @@ void readTouch(lv_indev_drv_t*, lv_indev_data_t* data) {
     const uint32_t releasedAt = millis();
     noteWakeActivity(releasedAt);
     if (touchBeganWhileBlanked) {
+      narrationGesture.reset();
       registerBlankedTap(releasedAt, dx, dy, releasedAt - touchStartAt);
       touchWasPressed = false;
       touchBeganWhileBlanked = false;
       return;
+    }
+    const uint32_t narrationPageId = narrationGestureHitPageId(endX, endY);
+    if (narrationGesture.release(
+            narrationPageId == touchNarrationPageId ? narrationPageId : 0,
+            releasedAt, releasedAt - touchStartAt,
+            touchMovedForNarration ? TAP_MAX_MOVEMENT + 1 : dx, dy,
+            endX, endY)) {
+      // Only enqueue intent here. Frame copying and request scheduling happen
+      // on the Arduino loop, never in LVGL's input callback.
+      pendingNarrationPageId = narrationPageId;
     }
     if (!provisioningScreen) {
       lastTouchAt = releasedAt;
@@ -966,14 +1049,24 @@ void releaseActiveAnimation() {
   activeAnimation = nullptr;
 }
 
+void forgetSlideWidgets() {
+  playbackContentPane = nullptr;
+  pageTransitionOutgoing = nullptr;
+  pageTransitionIncoming = nullptr;
+  slideIncomingNarrationVisible = false;
+}
+
 lv_obj_t* createScreen(uint32_t background) {
   releaseActiveAnimation();
+  forgetSlideWidgets();
   liveClockLabel = nullptr;
   playbackClockCard = nullptr;
   playbackDateShadowLabel = nullptr;
   playbackDateLabel = nullptr;
   playbackTimeShadowLabel = nullptr;
   playbackTimeLabel = nullptr;
+  imageNarrationVisible = false;
+  playbackOverlayPresentationValid = false;
   brightnessValueLabel = nullptr;
   editorYearRoller = nullptr;
   editorMonthRoller = nullptr;
@@ -990,15 +1083,6 @@ lv_obj_t* createScreen(uint32_t background) {
   lv_obj_set_style_border_width(screen, 0, 0);
   lv_obj_set_style_pad_all(screen, 0, 0);
   return screen;
-}
-
-bool containsUtf8(const String& text) {
-  for (size_t i = 0; i < text.length(); ++i) {
-    if (static_cast<uint8_t>(text[i]) >= 0x80) {
-      return true;
-    }
-  }
-  return false;
 }
 
 bool containsCjk(const String& text) {
@@ -1064,12 +1148,10 @@ lv_obj_t* addLabel(lv_obj_t* parent, const String& text,
   lv_label_set_long_mode(label, LV_LABEL_LONG_WRAP);
   lv_obj_set_width(label, width);
   const lv_font_t* selectedFont = font;
-  // Montserrat already contains Latin-1 marks such as °. ui_font_16_zh only
-  // covers the device's Chinese UI strings, so a UTF-8 check here turned °C
-  // into a missing-glyph box.
-  if (containsCjk(text) && font != &lv_font_simsun_16_cjk &&
-      font != &ui_font_emoji_32) {
-    selectedFont = &ui_font_16_zh;
+  // Emoji text uses its MiSans fallback for Chinese and English.
+  // Plain Chinese keeps the established 16px layout.
+  if (containsCjk(text) && font != &ui_font_emoji_32) {
+    selectedFont = &ui_font_misans_16;
   }
   lv_obj_set_style_text_font(label, selectedFont, 0);
   lv_obj_set_style_text_color(label, lv_color_hex(color), 0);
@@ -1082,7 +1164,17 @@ void alignPlaybackClockCard(lv_obj_t* card) {
     return;
   }
 
-  switch (playbackClockCorner) {
+  // A narration card owns the lower strip of image pages. Keep the optional
+  // clock/weather card in the corresponding top corner so the two overlays
+  // never cover one another.
+  PlaybackClockCorner corner = playbackClockCorner;
+  if (imageNarrationVisible && corner == PlaybackClockCorner::BottomLeft) {
+    corner = PlaybackClockCorner::TopLeft;
+  } else if (imageNarrationVisible &&
+             corner == PlaybackClockCorner::BottomRight) {
+    corner = PlaybackClockCorner::TopRight;
+  }
+  switch (corner) {
     case PlaybackClockCorner::TopLeft:
       lv_obj_align(card, LV_ALIGN_TOP_LEFT, PLAYBACK_CLOCK_INSET,
                    PLAYBACK_CLOCK_INSET);
@@ -1164,25 +1256,25 @@ void styleOverlayBox(lv_obj_t* obj) {
 void addPlaybackDateTime(lv_obj_t* parent, uint32_t textColor, int width,
                          int dateY, int timeY) {
   playbackDateShadowLabel =
-      addLabel(parent, "", &lv_font_montserrat_24, 0x000000, width);
+      addLabel(parent, "", &ui_font_misans_24, 0x000000, width);
   lv_obj_set_height(playbackDateShadowLabel, 27);
   lv_obj_align(playbackDateShadowLabel, LV_ALIGN_TOP_MID, 2, dateY + 2);
   lv_obj_set_style_text_opa(playbackDateShadowLabel, LV_OPA_50, 0);
 
   playbackDateLabel =
-      addLabel(parent, "", &lv_font_montserrat_24, textColor, width);
+      addLabel(parent, "", &ui_font_misans_24, textColor, width);
   lv_obj_set_height(playbackDateLabel, 27);
   lv_obj_align(playbackDateLabel, LV_ALIGN_TOP_MID, 0, dateY);
   lv_obj_set_style_text_opa(playbackDateLabel, LV_OPA_70, 0);
 
   playbackTimeShadowLabel =
-      addLabel(parent, "", &lv_font_montserrat_48, 0x000000, width);
+      addLabel(parent, "", &ui_font_misans_48, 0x000000, width);
   lv_obj_set_height(playbackTimeShadowLabel, 52);
   lv_obj_align(playbackTimeShadowLabel, LV_ALIGN_TOP_MID, 2, timeY + 2);
   lv_obj_set_style_text_opa(playbackTimeShadowLabel, LV_OPA_50, 0);
 
   playbackTimeLabel =
-      addLabel(parent, "", &lv_font_montserrat_48, textColor, width);
+      addLabel(parent, "", &ui_font_misans_48, textColor, width);
   lv_obj_set_height(playbackTimeLabel, 52);
   lv_obj_align(playbackTimeLabel, LV_ALIGN_TOP_MID, 0, timeY);
 }
@@ -1202,33 +1294,32 @@ void addPlaybackWeatherCluster(lv_obj_t* parent, bool available,
              static_cast<int>(snapshot.temperatureCelsius));
   }
   lv_obj_t* shadow =
-      addLabel(parent, temperature, &lv_font_montserrat_16, 0x000000, 56);
+      addLabel(parent, temperature, &ui_font_misans_16, 0x000000, 56);
   lv_obj_set_style_text_opa(shadow, LV_OPA_50, 0);
   lv_obj_align(shadow, LV_ALIGN_TOP_MID, 1, 58);
   lv_obj_t* label =
-      addLabel(parent, temperature, &lv_font_montserrat_16, textColor, 56);
+      addLabel(parent, temperature, &ui_font_misans_16, textColor, 56);
   lv_obj_align(label, LV_ALIGN_TOP_MID, -1, 56);
 }
 
 void addPlaybackClock(lv_obj_t* parent, bool onImage,
                       uint32_t contentColor = 0xFFFFFF) {
-  const bool showClock = appConfig.showDateTime();
   WeatherSnapshot snapshot;
-  const bool showWeather =
+  const bool weatherAvailable =
       onImage && appConfig.showWeather() && weatherGetSnapshot(snapshot);
-  if (!showClock && !showWeather) {
+  const PlaybackOverlayPresentation presentation =
+      playbackOverlayPresentation(
+          onImage, contentColor, appConfig.showDateTime(),
+          appConfig.showWeather(), weatherAvailable);
+  currentPlaybackOverlayPresentation = presentation;
+  playbackOverlayPresentationValid = true;
+  if (!presentation.visible) {
     return;
   }
 
   lv_obj_t* card = lv_obj_create(parent);
   playbackClockCard = card;
-  if (showClock && !showWeather) {
-    lv_obj_set_size(card, 184, 104);
-  } else if (showClock) {
-    lv_obj_set_size(card, 220, 104);
-  } else {
-    lv_obj_set_size(card, 72, 82);
-  }
+  lv_obj_set_size(card, presentation.width, presentation.height);
   if (!playbackClockMoveTimerStarted) {
     playbackClockCorner = static_cast<PlaybackClockCorner>(
         esp_random() % PLAYBACK_CLOCK_CORNER_COUNT);
@@ -1239,7 +1330,7 @@ void addPlaybackClock(lv_obj_t* parent, bool onImage,
   lv_obj_set_style_border_width(card, 0, 0);
   lv_obj_set_style_pad_all(card, 0, 0);
   lv_obj_set_style_radius(card, 18, 0);
-  if (onImage) {
+  if (presentation.darkBackground) {
     lv_obj_set_style_bg_color(card, lv_color_hex(0x101619), 0);
     lv_obj_set_style_bg_opa(card, LV_OPA_50, 0);
   } else {
@@ -1247,27 +1338,27 @@ void addPlaybackClock(lv_obj_t* parent, bool onImage,
   }
   lv_obj_clear_flag(card, LV_OBJ_FLAG_SCROLLABLE);
 
-  const uint32_t textColor = onImage ? 0xFFFFFF : contentColor;
-  if (showClock && !showWeather) {
+  const uint32_t textColor = presentation.textColor;
+  if (presentation.showClock && !presentation.showWeather) {
     playbackDateShadowLabel =
-        addLabel(card, "", &lv_font_montserrat_24, 0x000000, 184);
+        addLabel(card, "", &ui_font_misans_24, 0x000000, 184);
     lv_obj_set_height(playbackDateShadowLabel, 27);
     lv_obj_align(playbackDateShadowLabel, LV_ALIGN_TOP_MID, 2, 10);
     lv_obj_set_style_text_opa(playbackDateShadowLabel, LV_OPA_50, 0);
 
-    playbackDateLabel = addLabel(card, "", &lv_font_montserrat_24, textColor,
+    playbackDateLabel = addLabel(card, "", &ui_font_misans_24, textColor,
                                  184);
     lv_obj_set_height(playbackDateLabel, 27);
     lv_obj_align(playbackDateLabel, LV_ALIGN_TOP_MID, 0, 8);
     lv_obj_set_style_text_opa(playbackDateLabel, LV_OPA_70, 0);
 
     playbackTimeShadowLabel =
-        addLabel(card, "", &lv_font_montserrat_48, 0x000000, 184);
+        addLabel(card, "", &ui_font_misans_48, 0x000000, 184);
     lv_obj_set_height(playbackTimeShadowLabel, 52);
     lv_obj_align(playbackTimeShadowLabel, LV_ALIGN_TOP_MID, 2, 45);
     lv_obj_set_style_text_opa(playbackTimeShadowLabel, LV_OPA_50, 0);
 
-    playbackTimeLabel = addLabel(card, "", &lv_font_montserrat_48, textColor,
+    playbackTimeLabel = addLabel(card, "", &ui_font_misans_48, textColor,
                                  184);
     lv_obj_set_height(playbackTimeLabel, 52);
     lv_obj_align(playbackTimeLabel, LV_ALIGN_TOP_MID, 0, 43);
@@ -1284,7 +1375,7 @@ void addPlaybackClock(lv_obj_t* parent, bool onImage,
   lv_obj_set_style_pad_column(row, 4, 0);
   lv_obj_align(row, LV_ALIGN_CENTER, 0, 0);
 
-  if (showClock) {
+  if (presentation.showClock) {
     lv_obj_t* timeCol = lv_obj_create(row);
     styleOverlayBox(timeCol);
     lv_obj_set_size(timeCol, 142, 88);
@@ -1295,7 +1386,53 @@ void addPlaybackClock(lv_obj_t* parent, bool onImage,
   lv_obj_t* weatherCol = lv_obj_create(row);
   styleOverlayBox(weatherCol);
   lv_obj_set_size(weatherCol, 52, 76);
-  addPlaybackWeatherCluster(weatherCol, true, snapshot, textColor);
+  addPlaybackWeatherCluster(weatherCol, weatherAvailable, snapshot, textColor);
+}
+
+PlaybackOverlayPresentation desiredPlaybackOverlay(
+    bool onImage, uint32_t contentColor) {
+  WeatherSnapshot snapshot;
+  const bool weatherAvailable =
+      onImage && appConfig.showWeather() && weatherGetSnapshot(snapshot);
+  return playbackOverlayPresentation(
+      onImage, contentColor, appConfig.showDateTime(),
+      appConfig.showWeather(), weatherAvailable);
+}
+
+void finishPlaybackClockFade() {
+  if (!playbackClockCard) {
+    return;
+  }
+  lv_anim_del(playbackClockCard, nullptr);
+  lv_obj_remove_local_style_prop(playbackClockCard, LV_STYLE_OPA, 0);
+}
+
+void syncPlaybackOverlay(lv_obj_t* screen, const ContentPage& page) {
+  const bool onImage = page.type == PageType::Image;
+  const PlaybackOverlayPresentation desired = desiredPlaybackOverlay(
+      onImage, onImage ? 0xFFFFFF : page.foreground);
+  const bool widgetMatches =
+      desired.visible ? playbackClockCard != nullptr
+                      : playbackClockCard == nullptr;
+  if (playbackOverlayPresentationValid && widgetMatches &&
+      currentPlaybackOverlayPresentation == desired) {
+    alignPlaybackClockCard(playbackClockCard);
+    return;
+  }
+
+  if (playbackClockCard) {
+    lv_obj_del(playbackClockCard);
+  }
+  playbackClockCard = nullptr;
+  playbackDateShadowLabel = nullptr;
+  playbackDateLabel = nullptr;
+  playbackTimeShadowLabel = nullptr;
+  playbackTimeLabel = nullptr;
+  playbackDateText = "";
+  playbackTimeText = "";
+  playbackOverlayPresentationValid = false;
+  addPlaybackClock(screen, onImage,
+                   onImage ? 0xFFFFFF : page.foreground);
 }
 
 void updatePlaybackClockPosition(uint32_t now) {
@@ -1677,6 +1814,10 @@ void handleSettingsAction(lv_event_t* event) {
     case SettingsAction::ToggleWeather:
       appConfig.setShowWeather(!appConfig.showWeather());
       break;
+    case SettingsAction::ToggleImageNarration:
+      appConfig.setImageNarrationEnabled(
+          !appConfig.imageNarrationEnabled());
+      break;
     case SettingsAction::ToggleScreenOff:
       appConfig.setScreenOffEnabled(!appConfig.screenOffEnabled());
       break;
@@ -1739,7 +1880,7 @@ void handleSettingsAction(lv_event_t* event) {
 lv_obj_t* addSettingsButton(
     lv_obj_t* parent, const String& text, int x, int y, int width, int height,
     SettingsAction action, bool accent = false,
-    const lv_font_t* labelFont = &lv_font_montserrat_14) {
+    const lv_font_t* labelFont = &ui_font_misans_14) {
   lv_obj_t* button = lv_btn_create(parent);
   lv_obj_set_pos(button, x, y);
   lv_obj_set_size(button, width, height);
@@ -1789,14 +1930,14 @@ void renderProvisioning() {
 
   lv_obj_t* eyebrow =
       addLabel(screen, uiText("首次启动 / Wi-Fi", "First light / Wi-Fi"),
-               &lv_font_montserrat_14,
+               &ui_font_misans_14,
                0x101619, 420, LV_TEXT_ALIGN_LEFT);
   lv_obj_align(eyebrow, LV_ALIGN_TOP_LEFT, 72, 20);
 
   lv_obj_t* title = addLabel(screen,
                              uiText("扫码配置 Wi-Fi",
                                     "Scan to set up Wi-Fi"),
-                             &lv_font_montserrat_24, 0x101619, 430);
+                             &ui_font_misans_24, 0x101619, 430);
   lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 53);
 
   String qrPayload = "WIFI:T:WPA;S:" + escapeWifiQr(provisioningSsid) +
@@ -1808,7 +1949,7 @@ void renderProvisioning() {
                String(uiText("连接后打开设置页\n",
                              "Connect, then open the setup page\n")) +
                    provisioningAddress,
-               &lv_font_montserrat_16, 0x101619, 420);
+               &ui_font_misans_16, 0x101619, 420);
   lv_obj_align(helper, LV_ALIGN_BOTTOM_MID, 0, -27);
 
   loadScreen(screen);
@@ -1825,27 +1966,27 @@ void renderSystemPage() {
 
   lv_obj_t* eyebrow =
       addLabel(screen, uiText("ScreenDeck / 在线", "ScreenDeck / Online"),
-               &lv_font_montserrat_14,
+               &ui_font_misans_14,
                0xE7FF54, 420, LV_TEXT_ALIGN_LEFT);
   lv_obj_align(eyebrow, LV_ALIGN_TOP_LEFT, 72, 20);
 
   lv_obj_t* title =
       addLabel(screen, uiText("控制此屏幕", "Control this screen"),
-               &lv_font_montserrat_24,
+               &ui_font_misans_24,
                0xF4EFE6, 430);
   lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 53);
 
   addQr(screen, url, 230, 94);
 
   lv_obj_t* ipLabel =
-      addLabel(screen, ip, &lv_font_montserrat_28, 0xF4EFE6, 420);
+      addLabel(screen, ip, &ui_font_misans_28, 0xF4EFE6, 420);
   lv_obj_align(ipLabel, LV_ALIGN_BOTTOM_MID, 0, -61);
 
   const String hintText =
       appConfig.pageCount() == 0
           ? uiText("在此地址添加页面", "Add pages from this address")
           : uiText("10 秒后返回播放", "Returns to playback after 10 seconds");
-  lv_obj_t* hint = addLabel(screen, hintText, &lv_font_montserrat_14,
+  lv_obj_t* hint = addLabel(screen, hintText, &ui_font_misans_14,
                             0x93A0A5, 290, LV_TEXT_ALIGN_LEFT);
   lv_obj_align(hint, LV_ALIGN_BOTTOM_LEFT, 24, -24);
   addSettingsButton(screen, uiText("设置", "Settings"), 344, 426, 116, 36,
@@ -1924,12 +2065,12 @@ lv_obj_t* addSettingsRoller(lv_obj_t* parent, const String& options,
   lv_obj_set_style_bg_color(roller, lv_color_hex(0x20282A), LV_PART_MAIN);
   lv_obj_set_style_bg_opa(roller, LV_OPA_COVER, LV_PART_MAIN);
   lv_obj_set_style_text_color(roller, lv_color_hex(0x93A0A5), LV_PART_MAIN);
-  lv_obj_set_style_text_font(roller, &lv_font_montserrat_16, LV_PART_MAIN);
+  lv_obj_set_style_text_font(roller, &ui_font_misans_16, LV_PART_MAIN);
   lv_obj_set_style_bg_color(roller, lv_color_hex(0xE7FF54),
                             LV_PART_SELECTED);
   lv_obj_set_style_text_color(roller, lv_color_hex(0x101619),
                               LV_PART_SELECTED);
-  lv_obj_set_style_text_font(roller, &lv_font_montserrat_20,
+  lv_obj_set_style_text_font(roller, &ui_font_misans_20,
                              LV_PART_SELECTED);
   return roller;
 }
@@ -1944,7 +2085,7 @@ void renderSettingsHeader(lv_obj_t* screen) {
       addSettingsButton(screen, uiText("二维码", "QR"), 20, 16, 68, 36,
                         SettingsAction::Back);
   lv_obj_t* title = addLabel(screen, uiText("设备设置", "DEVICE SETTINGS"),
-                             &lv_font_montserrat_20, 0xF4EFE6, 280,
+                             &ui_font_misans_20, 0xF4EFE6, 280,
                              LV_TEXT_ALIGN_LEFT);
   lv_label_set_long_mode(title, LV_LABEL_LONG_CLIP);
   const lv_font_t* titleFont = lv_obj_get_style_text_font(title, 0);
@@ -1963,7 +2104,7 @@ void renderSettingsHeader(lv_obj_t* screen) {
 }
 
 void renderDisplaySettings(lv_obj_t* screen) {
-  const lv_font_t* settingsRowFont = &lv_font_montserrat_16;
+  const lv_font_t* settingsRowFont = &ui_font_misans_16;
   constexpr int kRowH = kSettingsCompactRowHeight;
   const int kBtnY = settingsButtonY(kRowH);
   lv_obj_t* list = addSettingsList(screen);
@@ -1971,12 +2112,12 @@ void renderDisplaySettings(lv_obj_t* screen) {
   lv_obj_t* brightnessPanel = addSettingsPanel(list, y, 78);
   lv_obj_t* brightnessLabel =
       addLabel(brightnessPanel, uiText("屏幕亮度", "Brightness"),
-               &lv_font_montserrat_14, 0xF4EFE6, 220, LV_TEXT_ALIGN_LEFT);
+               &ui_font_misans_14, 0xF4EFE6, 220, LV_TEXT_ALIGN_LEFT);
   placeSettingsText(brightnessLabel, 16, 44);
   brightnessValueLabel =
       addLabel(brightnessPanel,
                String(static_cast<unsigned>(appConfig.brightness())) + "%",
-               &lv_font_montserrat_20, 0xE7FF54, 80, LV_TEXT_ALIGN_RIGHT);
+               &ui_font_misans_20, 0xE7FF54, 80, LV_TEXT_ALIGN_RIGHT);
   placeSettingsText(brightnessValueLabel, 338, 44);
 
   lv_obj_t* brightnessSlider = lv_slider_create(brightnessPanel);
@@ -2001,7 +2142,7 @@ void renderDisplaySettings(lv_obj_t* screen) {
   lv_obj_t* transitionPanel = addSettingsPanel(list, y, kRowH);
   lv_obj_t* transitionLabel = addLabel(
       transitionPanel, uiText("切换动画", "Page animation"),
-      &lv_font_montserrat_14, 0xF4EFE6, 270, LV_TEXT_ALIGN_LEFT);
+      &ui_font_misans_14, 0xF4EFE6, 270, LV_TEXT_ALIGN_LEFT);
   placeSettingsText(transitionLabel, 16, kRowH);
   addSettingsButton(
       transitionPanel,
@@ -2013,7 +2154,7 @@ void renderDisplaySettings(lv_obj_t* screen) {
   lv_obj_t* clockPanel = addSettingsPanel(list, y, kRowH);
   lv_obj_t* clockLabel = addLabel(
       clockPanel, uiText("页面日期时间", "Date + time on pages"),
-      &lv_font_montserrat_14, 0xF4EFE6, 286, LV_TEXT_ALIGN_LEFT);
+      &ui_font_misans_14, 0xF4EFE6, 286, LV_TEXT_ALIGN_LEFT);
   placeSettingsText(clockLabel, 16, kRowH);
   addSettingsButton(
       clockPanel,
@@ -2034,14 +2175,14 @@ void renderDisplaySettings(lv_obj_t* screen) {
                                     : 286;
   lv_obj_t* weatherLabel = addLabel(
       weatherPanel, uiText("图片页天气", "Weather on image pages"),
-      &lv_font_montserrat_14, 0xF4EFE6, weatherTitleWidth, LV_TEXT_ALIGN_LEFT);
+      &ui_font_misans_14, 0xF4EFE6, weatherTitleWidth, LV_TEXT_ALIGN_LEFT);
   placeSettingsText(weatherLabel, 16, kRowH);
   if (weatherEnabled) {
     const char* locationText =
         weatherLocated ? weatherSnapshot.location : uiText("定位中", "Locating");
     const lv_font_t* locationFont = containsCjk(locationText)
-                                        ? &lv_font_simsun_16_cjk
-                                        : &lv_font_montserrat_14;
+                                        ? &ui_font_misans_16
+                                        : &ui_font_misans_14;
     const int locationX = 16 + weatherTitleWidth + 8;
     lv_obj_t* locationLabel = addLabel(
         weatherPanel, locationText, locationFont, 0x93A0A5,
@@ -2052,6 +2193,19 @@ void renderDisplaySettings(lv_obj_t* screen) {
       weatherPanel,
       weatherEnabled ? uiText("开启", "On") : uiText("关闭", "Off"),
       318, kBtnY, 100, 36, SettingsAction::ToggleWeather, weatherEnabled);
+
+  y += 56;
+  const bool imageNarrationEnabled = appConfig.imageNarrationEnabled();
+  lv_obj_t* narrationPanel = addSettingsPanel(list, y, kRowH);
+  lv_obj_t* narrationLabel = addLabel(
+      narrationPanel, uiText("图片摘要", "Image summary"), settingsRowFont,
+      0xF4EFE6, 286, LV_TEXT_ALIGN_LEFT);
+  placeSettingsText(narrationLabel, 16, kRowH);
+  addSettingsButton(
+      narrationPanel,
+      imageNarrationEnabled ? uiText("开启", "On") : uiText("关闭", "Off"),
+      318, kBtnY, 100, 36, SettingsAction::ToggleImageNarration,
+      imageNarrationEnabled, settingsRowFont);
 
   y += 56;
   lv_obj_t* screenOffPanel = addSettingsPanel(list, y, kRowH);
@@ -2093,18 +2247,18 @@ void renderDisplaySettings(lv_obj_t* screen) {
         list,
         uiText("天气使用网络定位，每 30 分钟自动更新",
                "Weather uses IP location and updates every 30 min"),
-        &lv_font_montserrat_14, 0x93A0A5, 420);
+        &ui_font_misans_14, 0x93A0A5, 420);
     lv_obj_set_pos(hint, 30, y + 56);
   }
 }
 
 void renderTimeSettings(lv_obj_t* screen) {
-  const lv_font_t* settingsRowFont = &lv_font_montserrat_16;
+  const lv_font_t* settingsRowFont = &ui_font_misans_16;
   constexpr int kRowH = kSettingsRowHeight;
   const int buttonY = settingsButtonY(kRowH);
   lv_obj_t* list = addSettingsList(screen);
   lv_obj_t* currentPanel = addSettingsPanel(list, 0, kRowH);
-  liveClockLabel = addLabel(currentPanel, "", &lv_font_montserrat_16,
+  liveClockLabel = addLabel(currentPanel, "", &ui_font_misans_16,
                             0xE7FF54, 236, LV_TEXT_ALIGN_LEFT);
   placeSettingsText(liveClockLabel, kSettingsRowInset, kRowH);
   addSettingsButton(currentPanel, uiText("手动", "Set"), 266, buttonY, 70, 36,
@@ -2136,7 +2290,7 @@ void renderSystemSettings(lv_obj_t* screen) {
   lv_obj_t* list = addSettingsList(screen);
   lv_obj_t* languagePanel = addSettingsPanel(list, 0, kRowH);
   lv_obj_t* languageLabel = addLabel(
-      languagePanel, uiText("界面语言", "Language"), &lv_font_montserrat_14,
+      languagePanel, uiText("界面语言", "Language"), &ui_font_misans_14,
       0xF4EFE6, 230, LV_TEXT_ALIGN_LEFT);
   placeSettingsText(languageLabel, kSettingsRowInset, kRowH);
   addSettingsButton(languagePanel, "中文", 266, buttonY, 72, 36,
@@ -2151,7 +2305,7 @@ void renderSystemSettings(lv_obj_t* screen) {
   constexpr int kScanWidth = 88;
   constexpr int kScanX = 440 - kSettingsRowInset - kScanWidth;
   lv_obj_t* sdLabel =
-      addLabel(sdPanel, uiText("TF 卡", "TF card"), &lv_font_montserrat_14,
+      addLabel(sdPanel, uiText("TF 卡", "TF card"), &ui_font_misans_14,
                0x93A0A5, kSdLabelWidth, LV_TEXT_ALIGN_LEFT);
   placeSettingsText(sdLabel, kSettingsRowInset, kRowH);
   String sdCapacity = uiText("未找到", "Not detected");
@@ -2169,7 +2323,7 @@ void renderSystemSettings(lv_obj_t* screen) {
   }
   const int sdValueX = kSettingsRowInset + kSdLabelWidth + kSettingsRowGap;
   lv_obj_t* sdCapacityLabel =
-      addLabel(sdPanel, sdCapacity, &lv_font_montserrat_14, sdCapacityColor,
+      addLabel(sdPanel, sdCapacity, &ui_font_misans_14, sdCapacityColor,
                kScanX - kSettingsRowGap - sdValueX, LV_TEXT_ALIGN_LEFT);
   placeSettingsText(sdCapacityLabel, sdValueX, kRowH, true);
   addSettingsButton(sdPanel, uiText("扫描", "Scan"), kScanX, buttonY, kScanWidth,
@@ -2179,14 +2333,14 @@ void renderSystemSettings(lv_obj_t* screen) {
   constexpr int kWifiLabelWidth = 130;
   lv_obj_t* networkLabel =
       addLabel(networkPanel, uiText("当前 Wi-Fi", "Current Wi-Fi"),
-               &lv_font_montserrat_14, 0x93A0A5, kWifiLabelWidth,
+               &ui_font_misans_14, 0x93A0A5, kWifiLabelWidth,
                LV_TEXT_ALIGN_LEFT);
   placeSettingsText(networkLabel, kSettingsRowInset, kRowH);
   const String ssid = WiFi.SSID().isEmpty()
                           ? String(uiText("未连接", "Not connected"))
                           : WiFi.SSID();
   const int ssidX = kSettingsRowInset + kWifiLabelWidth + kSettingsRowGap;
-  lv_obj_t* ssidLabel = addLabel(networkPanel, ssid, &lv_font_montserrat_16,
+  lv_obj_t* ssidLabel = addLabel(networkPanel, ssid, &ui_font_misans_16,
                                  0xF4EFE6, 440 - kSettingsRowInset - ssidX,
                                  LV_TEXT_ALIGN_LEFT);
   placeSettingsText(ssidLabel, ssidX, kRowH, true);
@@ -2195,7 +2349,7 @@ void renderSystemSettings(lv_obj_t* screen) {
   constexpr int kFirmwareLabelWidth = 96;
   lv_obj_t* firmwareLabel =
       addLabel(firmwarePanel, uiText("固件", "Firmware"),
-               &lv_font_montserrat_14, 0x93A0A5, kFirmwareLabelWidth,
+               &ui_font_misans_14, 0x93A0A5, kFirmwareLabelWidth,
                LV_TEXT_ALIGN_LEFT);
   placeSettingsText(firmwareLabel, kSettingsRowInset, kRowH);
   String firmwareDetail = SCREENDECK_VERSION;
@@ -2207,7 +2361,7 @@ void renderSystemSettings(lv_obj_t* screen) {
   const int firmwareValueX =
       kSettingsRowInset + kFirmwareLabelWidth + kSettingsRowGap;
   lv_obj_t* firmwareValue = addLabel(
-      firmwarePanel, firmwareDetail, &lv_font_montserrat_16, 0xE7FF54,
+      firmwarePanel, firmwareDetail, &ui_font_misans_16, 0xE7FF54,
       440 - kSettingsRowInset - firmwareValueX, LV_TEXT_ALIGN_LEFT);
   placeSettingsText(firmwareValue, firmwareValueX, kRowH, true);
 
@@ -2220,15 +2374,18 @@ void renderSystemSettings(lv_obj_t* screen) {
       list,
       uiText("设备重启后会重新显示配网二维码",
              "The setup QR returns after the device restarts"),
-      &lv_font_montserrat_14, 0x93A0A5, 400);
+      &ui_font_misans_14, 0x93A0A5, 400);
   lv_obj_set_pos(warning, 20, resetY + 56);
+  lv_obj_t* fontCredit = addLabel(
+      list, "MiSans / Xiaomi", &ui_font_misans_14, 0x93A0A5, 400);
+  lv_obj_set_pos(fontCredit, 20, resetY + 104);
 }
 
 void renderEditorTitle(lv_obj_t* screen, const String& title,
                        SettingsAction saveAction) {
   addSettingsButton(screen, uiText("取消", "Cancel"), 20, 18, 86, 38,
                     SettingsAction::CancelEditor);
-  lv_obj_t* titleLabel = addLabel(screen, title, &lv_font_montserrat_20,
+  lv_obj_t* titleLabel = addLabel(screen, title, &ui_font_misans_20,
                                   0xF4EFE6, 250);
   lv_obj_set_pos(titleLabel, 115, 27);
   addSettingsButton(screen, uiText("保存", "Save"), 376, 18, 84, 38,
@@ -2237,7 +2394,7 @@ void renderEditorTitle(lv_obj_t* screen, const String& title,
 
 void addEditorColumnLabel(lv_obj_t* screen, const String& text, int x,
                           int width) {
-  lv_obj_t* label = addLabel(screen, text, &lv_font_montserrat_14, 0x93A0A5,
+  lv_obj_t* label = addLabel(screen, text, &ui_font_misans_14, 0x93A0A5,
                              width);
   lv_obj_set_pos(label, x, 82);
 }
@@ -2301,7 +2458,7 @@ void renderTimeEditor(lv_obj_t* screen) {
                       LV_EVENT_VALUE_CHANGED, nullptr);
   lv_obj_add_event_cb(editorMinuteRoller, handleTimeRollerChanged,
                       LV_EVENT_VALUE_CHANGED, nullptr);
-  lv_obj_t* colon = addLabel(screen, ":", &lv_font_montserrat_28, 0xE7FF54,
+  lv_obj_t* colon = addLabel(screen, ":", &ui_font_misans_28, 0xE7FF54,
                              32);
   lv_obj_set_pos(colon, 224, 230);
 }
@@ -2309,19 +2466,19 @@ void renderTimeEditor(lv_obj_t* screen) {
 void renderWifiResetConfirmation(lv_obj_t* screen) {
   lv_obj_t* title =
       addLabel(screen, uiText("清除 Wi-Fi？", "Clear Wi-Fi?"),
-               &lv_font_montserrat_28, 0xF4EFE6, 410);
+               &ui_font_misans_28, 0xF4EFE6, 410);
   lv_obj_set_pos(title, 35, 82);
   lv_obj_t* body = addLabel(
       screen,
       uiText("保存的网络名称和密码将被删除。设备会重启并返回配网二维码。",
              "The saved network and password will be removed. The device will restart in setup mode."),
-      &lv_font_montserrat_16, 0x93A0A5, 400);
+      &ui_font_misans_16, 0x93A0A5, 400);
   lv_obj_set_pos(body, 40, 150);
 
   if (wifiResetInProgress) {
     lv_obj_t* pending =
         addLabel(screen, uiText("正在清除并重启…", "Clearing and restarting…"),
-                 &lv_font_montserrat_20, 0xE7FF54, 400);
+                 &ui_font_misans_20, 0xE7FF54, 400);
     lv_obj_set_pos(pending, 40, 300);
     return;
   }
@@ -2377,23 +2534,124 @@ void populateTextContent(lv_obj_t* parent, const ContentPage& page) {
 
   const bool hasEmoji = containsEmoji(page.text);
   const String renderedText = hasEmoji ? normalizeEmojiText(page.text) : page.text;
-  const lv_font_t* font = &lv_font_montserrat_32;
+  const lv_font_t* font = &ui_font_misans_32;
   if (hasEmoji) {
     font = &ui_font_emoji_32;
-  } else if (containsUtf8(renderedText)) {
-    font = &lv_font_simsun_16_cjk;
+  } else if (containsCjk(renderedText)) {
+    font = &ui_font_misans_16;
   } else if (renderedText.length() > 180) {
-    font = &lv_font_montserrat_20;
+    font = &ui_font_misans_20;
   } else if (renderedText.length() > 80) {
-    font = &lv_font_montserrat_24;
+    font = &ui_font_misans_24;
   } else if (renderedText.length() < 36) {
-    font = &lv_font_montserrat_40;
+    font = &ui_font_misans_40;
   }
 
   lv_obj_t* label =
       addLabel(parent, renderedText, font, page.foreground, 410);
   lv_obj_set_style_text_line_space(label, 10, 0);
   lv_obj_align(label, LV_ALIGN_CENTER, 0, -8);
+}
+
+bool requestImageNarration(const ContentPage& page, bool regenerate = false) {
+  if (!appConfig.imageNarrationEnabled() || !appConfig.llmConfigured() ||
+      (!regenerate && !page.narration.isEmpty())) {
+    return false;
+  }
+  if (mediaIsAnimatedPath(page.imagePath)) {
+    if (activeAnimation) {
+      lv_gif_t* gif = reinterpret_cast<lv_gif_t*>(activeAnimation);
+      if (gif->gif && gif->imgdsc.data) {
+        return llmNarrationRequestRgb565Alpha(
+            page.id, page.imagePath,
+            static_cast<const uint8_t*>(gif->imgdsc.data), gif->gif->width,
+            gif->gif->height, appConfig.llmBaseUrl(), appConfig.llmApiKey(),
+            appConfig.llmModel(), appConfig.llmNarrationPrompt(), regenerate);
+      }
+    }
+    return false;
+  }
+  return llmNarrationRequest(page.id, page.imagePath, appConfig.llmBaseUrl(),
+                             appConfig.llmApiKey(), appConfig.llmModel(),
+                             appConfig.llmNarrationPrompt(), regenerate);
+}
+
+void refreshImageNarration(lv_obj_t* obj, const ContentPage& page) {
+  if (!obj || lv_obj_has_flag(obj, LV_OBJ_FLAG_HIDDEN)) {
+    return;
+  }
+  if (lv_obj_has_flag(obj, LV_OBJ_FLAG_USER_1)) {
+    if (lv_obj_get_child_cnt(obj) != 3) {
+      return;
+    }
+    const String text = llmNarrationBusyForImage(page.imagePath)
+                            ? String(uiText("正在重新生成摘要…",
+                                            "Regenerating summary…"))
+                            : page.narration;
+    lv_obj_t* label = lv_obj_get_child(obj, 1);
+    if (strcmp(lv_label_get_text(label), text.c_str()) == 0) {
+      return;
+    }
+    lv_label_set_text(label, text.c_str());
+    lv_label_set_text(lv_obj_get_child(obj, 2), text.c_str());
+    lv_obj_update_layout(label);
+    lv_obj_set_height(obj, LV_MAX(lv_obj_get_height(lv_obj_get_child(obj, 0)),
+                                 lv_obj_get_height(label)));
+    return;
+  }
+  for (uint32_t i = 0; i < lv_obj_get_child_cnt(obj); ++i) {
+    lv_obj_t* child = lv_obj_get_child(obj, i);
+    // During settled playback only the current pane is visible. Never apply
+    // its summary/status to preloaded neighbouring panes.
+    if (lv_obj_is_visible(child)) {
+      refreshImageNarration(child, page);
+    }
+  }
+}
+
+void addImageNarration(lv_obj_t* parent, const ContentPage& page) {
+  const bool enabled = appConfig.imageNarrationEnabled();
+  imageNarrationVisible = enabled && !page.narration.isEmpty();
+  if (!enabled) {
+    return;
+  }
+  if (!imageNarrationVisible) {
+    requestImageNarration(page);
+    return;
+  }
+
+  lv_obj_t* card = lv_obj_create(parent);
+  constexpr lv_coord_t inset = 28;
+  lv_obj_add_flag(card, LV_OBJ_FLAG_USER_1);
+  lv_obj_set_size(card, 424, 24);
+  lv_obj_align(card, LV_ALIGN_BOTTOM_LEFT, inset, -inset);
+  lv_obj_set_style_bg_opa(card, LV_OPA_TRANSP, 0);
+  lv_obj_set_style_border_width(card, 0, 0);
+  lv_obj_set_style_pad_all(card, 0, 0);
+  lv_obj_clear_flag(card, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_clear_flag(card, LV_OBJ_FLAG_CLICKABLE);
+
+  lv_obj_t* icon = lv_img_create(card);
+  lv_img_set_src(icon, &narration_auto_awesome_icon);
+  lv_obj_align(icon, LV_ALIGN_LEFT_MID, 0, 0);
+
+  // One-pixel horizontal emboldening keeps all GB2312 glyphs without another
+  // large font in flash. Identical widths keep both layers wrapped together.
+  for (int offset = 0; offset <= 1; ++offset) {
+    lv_obj_t* label =
+        addLabel(card, page.narration, &ui_font_misans_16, 0xFFFFFF, 387,
+                 LV_TEXT_ALIGN_LEFT);
+    lv_obj_set_style_text_line_space(label, 5, 0);
+    lv_obj_align(label, LV_ALIGN_LEFT_MID, 36 + offset, 0);
+    if (offset == 0) {
+      // Fit the real wrapped text and icon so the visible block, not an empty
+      // fixed-height container, has matching left and bottom insets.
+      lv_obj_update_layout(label);
+      lv_obj_set_height(card, LV_MAX(lv_obj_get_height(icon),
+                                    lv_obj_get_height(label)));
+    }
+  }
+  refreshImageNarration(card, page);
 }
 
 void renderTextPage(const ContentPage& page) {
@@ -2431,7 +2689,7 @@ void renderAnimatedPage(lv_obj_t* screen, const ContentPage& page) {
         screen,
         uiText("动图无法播放\n请使用不超过 480 x 480 的 GIF",
                "This GIF cannot be played\nUse a GIF up to 480 x 480"),
-        &lv_font_montserrat_20, 0xF4EFE6, 410);
+        &ui_font_misans_20, 0xF4EFE6, 410);
     lv_obj_center(error);
     return;
   }
@@ -2466,7 +2724,10 @@ void renderStillImage(lv_obj_t* screen, const ContentPage& page) {
     const uint32_t zoomY = (SCREEN_HEIGHT * 256UL) / header.h;
     // Cover the square panel and let the screen clip the longer edge. New web
     // uploads are already cropped to 480 x 480; this also fixes older images.
-    lv_img_set_zoom(image, min<uint32_t>(max<uint32_t>(zoomX, zoomY), 65535));
+    const uint32_t zoom = min<uint32_t>(max<uint32_t>(zoomX, zoomY), 65535);
+    if (zoom != LV_IMG_ZOOM_NONE) {
+      lv_img_set_zoom(image, zoom);
+    }
     lv_obj_center(image);
   } else {
     Serial.printf("[image] cannot decode %s\n", page.imagePath.c_str());
@@ -2475,7 +2736,7 @@ void renderStillImage(lv_obj_t* screen, const ContentPage& page) {
                  uiText("图片无法解码\n请使用不超过 1024 x 1024 的 PNG/JPG",
                         "This image could not be decoded\nUse a PNG or JPG up "
                         "to 1024 x 1024"),
-                 &lv_font_montserrat_20, 0xF4EFE6, 410);
+                 &ui_font_misans_20, 0xF4EFE6, 410);
     lv_obj_center(error);
   }
   activeCachedImagePath = cached ? cached->path : "";
@@ -2493,6 +2754,7 @@ void renderImagePage(const ContentPage& page) {
     renderStillImage(screen, page);
   }
 
+  addImageNarration(screen, page);
   addPlaybackClock(screen, true);
   loadScreen(screen);
 }
@@ -2628,22 +2890,72 @@ uint32_t pagePaneBackground(const ContentPage& page) {
 void populatePageContent(lv_obj_t* parent, const ContentPage& page) {
   if (page.type == PageType::Image) {
     renderStillImage(parent, page);
+    addImageNarration(parent, page);
     return;
   }
+  imageNarrationVisible = false;
   populateTextContent(parent, page);
 }
 
-lv_obj_t* createPagePane(lv_obj_t* track, int16_t x, uint32_t background) {
-  lv_obj_t* pane = lv_obj_create(track);
+lv_obj_t* createPagePane(lv_obj_t* parent, int16_t x, uint32_t background,
+                         bool opaque) {
+  lv_obj_t* pane = lv_obj_create(parent);
   lv_obj_set_pos(pane, x, 0);
   lv_obj_set_size(pane, SCREEN_WIDTH, SCREEN_HEIGHT);
   lv_obj_clear_flag(pane, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_clear_flag(pane, LV_OBJ_FLAG_CLICKABLE);
   lv_obj_set_style_radius(pane, 0, 0);
   lv_obj_set_style_pad_all(pane, 0, 0);
   lv_obj_set_style_border_width(pane, 0, 0);
   lv_obj_set_style_bg_color(pane, lv_color_hex(background), 0);
-  lv_obj_set_style_bg_opa(pane, LV_OPA_COVER, 0);
+  lv_obj_set_style_bg_opa(pane, opaque ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
   return pane;
+}
+
+lv_obj_t* captureOutgoingPane(lv_obj_t* screen, uint32_t background,
+                              bool opaque) {
+  if (playbackContentPane) {
+    lv_obj_set_pos(playbackContentPane, 0, 0);
+    return playbackContentPane;
+  }
+
+  lv_obj_t* pane = createPagePane(screen, 0, background, opaque);
+  for (int32_t i = static_cast<int32_t>(lv_obj_get_child_cnt(screen)) - 1;
+       i >= 0; --i) {
+    lv_obj_t* child = lv_obj_get_child(screen, i);
+    if (!child || child == pane || child == playbackClockCard) {
+      continue;
+    }
+    lv_obj_set_parent(child, pane);
+  }
+  return pane;
+}
+
+void applySlideShift(int16_t outgoingX) {
+  if (pageTransitionOutgoing) {
+    lv_obj_set_x(pageTransitionOutgoing, outgoingX);
+  }
+  if (pageTransitionIncoming) {
+    lv_obj_set_x(pageTransitionIncoming,
+                 outgoingX + pageTransitionDirection * SCREEN_WIDTH);
+  }
+}
+
+void settleSlidePanes() {
+  if (pageTransitionOutgoing) {
+    lv_obj_del(pageTransitionOutgoing);
+  }
+  pageTransitionOutgoing = nullptr;
+  if (pageTransitionIncoming) {
+    lv_obj_set_x(pageTransitionIncoming, 0);
+    playbackContentPane = pageTransitionIncoming;
+  } else {
+    playbackContentPane = nullptr;
+  }
+  pageTransitionIncoming = nullptr;
+  imageNarrationVisible = slideIncomingNarrationVisible;
+  slideIncomingNarrationVisible = false;
+  alignPlaybackClockCard(playbackClockCard);
 }
 
 bool pageCanUseSlide(size_t pageIndex) {
@@ -2670,16 +2982,50 @@ bool ensureSlideImageReady(const ContentPage& page) {
       !cacheableImagePath(page.imagePath)) {
     return false;
   }
-  return loadCachedImage(page.imagePath) != nullptr;
+  return findCachedImage(page.imagePath) != nullptr;
+}
+
+bool slideNeedsWarm(int8_t direction) {
+  if (appConfig.pageTransitionStyle() != PageTransitionStyle::SlideHorizontal ||
+      currentPage == 0) {
+    return false;
+  }
+  const size_t incomingPage = findPlayablePage(currentPage, direction, false);
+  if (incomingPage == 0 || !pageCanUseSlide(currentPage) ||
+      !pageCanUseSlide(incomingPage)) {
+    return false;
+  }
+  return !ensureSlideImageReady(appConfig.page(currentPage - 1)) ||
+         !ensureSlideImageReady(appConfig.page(incomingPage - 1));
+}
+
+void warmSlideImages(int8_t direction) {
+  if (currentPage == 0) {
+    return;
+  }
+  const size_t incomingPage = findPlayablePage(currentPage, direction, false);
+  if (incomingPage == 0) {
+    return;
+  }
+  const ContentPage& outgoingPage = appConfig.page(currentPage - 1);
+  const ContentPage& incomingContent = appConfig.page(incomingPage - 1);
+  if (outgoingPage.type == PageType::Image &&
+      cacheableImagePath(outgoingPage.imagePath)) {
+    loadCachedImage(outgoingPage.imagePath);
+  }
+  if (incomingContent.type == PageType::Image &&
+      cacheableImagePath(incomingContent.imagePath)) {
+    loadCachedImage(incomingContent.imagePath);
+  }
 }
 
 void startFadeTransition(int8_t direction, uint32_t startedAt) {
   pageTransitionDirection = direction > 0 ? 1 : -1;
+  lastPlaybackDirection = pageTransitionDirection;
   pageTransitionPhase = PageTransitionPhase::FadingOut;
   pageTransitionStartedAt = startedAt;
   pageTransitionLastStepAt = startedAt;
   pageTransitionPercent = 100;
-  pageTransitionTrack = nullptr;
   backlightApply();
 }
 
@@ -2696,64 +3042,55 @@ bool startSlideTransition(int8_t direction, uint32_t startedAt) {
 
   const ContentPage outgoingPage = appConfig.page(currentPage - 1);
   const ContentPage incomingContent = appConfig.page(incomingPage - 1);
-  // Decode the incoming still while the current page is still on screen. A
-  // cache miss used to abort into a fade, which made the slide setting look
-  // intermittent during the first swipe or a fast skip.
+  // Both stills must already be in the resident cache. Loading them here ran
+  // a 450 KB flash read under the live LVGL lock and starved RGB refill.
   if (!ensureSlideImageReady(outgoingPage) ||
       !ensureSlideImageReady(incomingContent)) {
     return false;
   }
+  lv_obj_t* screen = lv_scr_act();
+  if (!screen) {
+    return false;
+  }
+
   currentPage = incomingPage;
   resumeContentPage = currentPage;
 
   const int8_t normalized = direction > 0 ? 1 : -1;
-  const int16_t fromX = normalized > 0 ? 0 : -SCREEN_WIDTH;
-  const int16_t toX = normalized > 0 ? -SCREEN_WIDTH : 0;
-  const int16_t outgoingX = normalized > 0 ? 0 : SCREEN_WIDTH;
-  const int16_t incomingX = normalized > 0 ? SCREEN_WIDTH : 0;
-
-  provisioningScreen = false;
-  deviceSettingsScreen = false;
-  lv_obj_t* screen = createScreen(0x050505);
-  lv_obj_t* viewport = lv_obj_create(screen);
-  lv_obj_set_pos(viewport, 0, 0);
-  lv_obj_set_size(viewport, SCREEN_WIDTH, SCREEN_HEIGHT);
-  lv_obj_clear_flag(viewport, LV_OBJ_FLAG_SCROLLABLE);
-  lv_obj_clear_flag(viewport, LV_OBJ_FLAG_OVERFLOW_VISIBLE);
-  lv_obj_set_style_radius(viewport, 0, 0);
-  lv_obj_set_style_pad_all(viewport, 0, 0);
-  lv_obj_set_style_border_width(viewport, 0, 0);
-  lv_obj_set_style_bg_opa(viewport, LV_OPA_TRANSP, 0);
-  lv_obj_t* track = lv_obj_create(viewport);
-  lv_obj_set_size(track, SCREEN_WIDTH * 2, SCREEN_HEIGHT);
-  lv_obj_set_pos(track, fromX, 0);
-  lv_obj_clear_flag(track, LV_OBJ_FLAG_SCROLLABLE);
-  lv_obj_add_flag(track, LV_OBJ_FLAG_OVERFLOW_VISIBLE);
-  lv_obj_set_style_radius(track, 0, 0);
-  lv_obj_set_style_pad_all(track, 0, 0);
-  lv_obj_set_style_border_width(track, 0, 0);
-  lv_obj_set_style_bg_opa(track, LV_OPA_TRANSP, 0);
-
-  populatePageContent(createPagePane(track, outgoingX,
-                                     pagePaneBackground(outgoingPage)),
-                      outgoingPage);
-  populatePageContent(createPagePane(track, incomingX,
-                                     pagePaneBackground(incomingContent)),
-                      incomingContent);
-  // Keep the date/weather card as a screen overlay so it does not slide away
-  // or get rebuilt (and flash) when the pages settle.
-  const bool incomingImage = incomingContent.type == PageType::Image;
-  addPlaybackClock(screen, incomingImage,
-                   incomingImage ? 0xFFFFFF : incomingContent.foreground);
+  const bool outgoingOpaque = outgoingPage.type != PageType::Image;
+  const bool incomingOpaque = incomingContent.type != PageType::Image;
+  // A corner move may have started the card's opacity animation in the
+  // preceding loop pass. Finish it before the full-screen slide begins so the
+  // TRIPLE_FULL renderer has only one invalidation source.
+  finishPlaybackClockFade();
+  lv_obj_t* outgoing = captureOutgoingPane(
+      screen, pagePaneBackground(outgoingPage), outgoingOpaque);
+  lv_obj_t* incoming =
+      createPagePane(screen, normalized * SCREEN_WIDTH,
+                     pagePaneBackground(incomingContent), incomingOpaque);
+  const bool outgoingNarrationVisible = imageNarrationVisible;
+  populatePageContent(incoming, incomingContent);
+  slideIncomingNarrationVisible = imageNarrationVisible;
+  imageNarrationVisible = outgoingNarrationVisible ||
+                          slideIncomingNarrationVisible;
+  if (incomingContent.type != PageType::Image) {
+    activeCachedImagePath = "";
+  }
+  // The card stays fixed above both panes, but its contents, colors and
+  // background belong to the incoming page. Rebuild only when that visual
+  // presentation changes (for example text -> image or a new text color).
+  syncPlaybackOverlay(screen, incomingContent);
   if (playbackClockCard) {
     lv_obj_move_foreground(playbackClockCard);
   }
-  loadScreen(screen);
 
-  pageTransitionTrack = track;
-  pageTransitionSlideFromX = fromX;
-  pageTransitionSlideToX = toX;
+  pageTransitionOutgoing = outgoing;
+  pageTransitionIncoming = incoming;
+  pageTransitionSlideFromX = 0;
+  pageTransitionSlideToX = -normalized * SCREEN_WIDTH;
   pageTransitionDirection = normalized;
+  lastPlaybackDirection = normalized;
+  applySlideShift(0);
   pageTransitionPhase = PageTransitionPhase::Sliding;
   pageTransitionStartedAt = startedAt;
   pageTransitionLastStepAt = startedAt;
@@ -2762,17 +3099,15 @@ bool startSlideTransition(int8_t direction, uint32_t startedAt) {
 }
 
 void finishSlideTransition(uint32_t now) {
+  settleSlidePanes();
   pageTransitionPhase = PageTransitionPhase::Idle;
   pageTransitionDirection = 0;
   pageTransitionStartedAt = 0;
   pageTransitionLastStepAt = 0;
   pageTransitionPercent = 100;
-  pageTransitionTrack = nullptr;
   pageTransitionSlideFromX = 0;
   pageTransitionSlideToX = 0;
   lastPageChangeAt = now;
-  // The incoming page and overlay are already on screen. Rebuilding here made
-  // the date/time card vanish and fade back in after every swipe.
 }
 
 void commitPageChange(int8_t direction) {
@@ -2804,6 +3139,9 @@ void commitPageChange(int8_t direction) {
 }
 
 void changePage(int8_t direction, uint32_t startedAt) {
+  if (deviceSettingsScreen) {
+    return;
+  }
   if (appConfig.pageCount() == 0) {
     lastPageChangeAt = startedAt;
     return;
@@ -2831,13 +3169,11 @@ void updatePageTransition(uint32_t now) {
       return;
     }
     pageTransitionLastStepAt = now;
-    if (pageTransitionTrack) {
-      lv_obj_set_x(pageTransitionTrack,
-                   phaseComplete ? pageTransitionSlideToX
-                                 : easedCoordinate(pageTransitionSlideFromX,
-                                                   pageTransitionSlideToX,
-                                                   elapsed, PAGE_SLIDE_MS));
-    }
+    applySlideShift(phaseComplete
+                        ? pageTransitionSlideToX
+                        : easedCoordinate(pageTransitionSlideFromX,
+                                          pageTransitionSlideToX, elapsed,
+                                          PAGE_SLIDE_MS));
     if (phaseComplete) {
       finishSlideTransition(now);
     }
@@ -2957,7 +3293,7 @@ bool displayBegin() {
 
   lv_png_init();
   lv_split_jpeg_init();
-  lv_img_cache_set_size(1);
+  lv_img_cache_set_size(2);
   if (!espDisplayStackStart()) {
     Serial.println("[display] ESP-IDF LVGL worker failed to start");
     return false;
@@ -3010,10 +3346,10 @@ void displayShowBootMessage(const String& title, const String& detail) {
   lv_obj_t* screen = createScreen(0x101619);
   addCornerMark(screen, 0xE7FF54);
   lv_obj_t* titleLabel =
-      addLabel(screen, title, &lv_font_montserrat_32, 0xF4EFE6, 410);
+      addLabel(screen, title, &ui_font_misans_32, 0xF4EFE6, 410);
   lv_obj_align(titleLabel, LV_ALIGN_CENTER, 0, -24);
   lv_obj_t* detailLabel =
-      addLabel(screen, detail, &lv_font_montserrat_16, 0x93A0A5, 410);
+      addLabel(screen, detail, &ui_font_misans_16, 0x93A0A5, 410);
   lv_obj_align(detailLabel, LV_ALIGN_CENTER, 0, 34);
   loadScreen(screen);
 }
@@ -3059,6 +3395,8 @@ void displayMarkContentDirty() {
     return;
   }
   contentDirty = true;
+  narrationGesture.reset();
+  pendingNarrationPageId = 0;
 }
 
 void displayMarkSettingsDirty() {
@@ -3154,153 +3492,249 @@ void displayLoop() {
         ++settingsSaveRetryCount;
         settingsSavePending = true;
         settingsSaveDueAt = millis() + SETTINGS_SAVE_RETRY_MS;
+      } else if (retryGuard.locked() && !settingsSavePending &&
+                 appConfig.imageNarrationEnabled() !=
+                     appConfig.persistedImageNarrationEnabled()) {
+        // Keep the newly added toggle honest if flash remains unwritable: the
+        // runtime and web status must agree with what the next boot will load.
+        appConfig.restorePersistedImageNarrationEnabled();
+        settingsSaveRetryCount = 0;
+        contentDirty = true;
+        Serial.println(
+            "[settings] restored the persisted image summary setting");
       }
     }
   }
 
   // esp_lvgl_adapter owns the LVGL tick and timer handler. Application-side
   // mutations are serialized with the same recursive mutex.
-  LvglLockGuard guard;
-  if (!guard.locked()) {
-    return;
-  }
-  const uint32_t now = millis();
+  int8_t queuedDirection = 0;
+  bool warmBeforeChange = false;
+  {
+    LvglLockGuard guard;
+    if (!guard.locked()) {
+      return;
+    }
+    const uint32_t now = millis();
 
-  bool contentWasRendered = false;
-  if (contentDirty && !provisioningScreen) {
-    contentDirty = false;
-    // A storage or playlist change may make previously skipped pages usable.
-    // Let the next playback render re-evaluate availability even if settings
-    // currently owns the screen.
-    playableContentUnavailable = false;
-    lv_img_cache_invalidate_src(nullptr);
-    dropUnreferencedCachedImages();
-    const size_t pageCount = appConfig.pageCount();
-    if (pageCount == 0) {
-      currentPage = 0;
-      resumeContentPage = 1;
-    } else {
-      if (currentPage == 0 || currentPage > pageCount) {
-        currentPage = min(resumeContentPage, pageCount);
-        if (currentPage == 0) {
-          currentPage = 1;
+    if (pendingNarrationPageId != 0) {
+      const uint32_t requestedPageId = pendingNarrationPageId;
+      pendingNarrationPageId = 0;
+      if (requestedPageId == narrationGesturePageId()) {
+        const ContentPage& page = appConfig.page(currentPage - 1);
+        const bool queued = !llmNarrationBusyForImage(page.imagePath) &&
+                            requestImageNarration(page, true);
+        Serial.println(queued ? "[narration] regeneration queued"
+                              : "[narration] regeneration unavailable or busy");
+        if (queued) {
+          refreshImageNarration(lv_scr_act(), appConfig.page(currentPage - 1));
         }
       }
-      resumeContentPage = currentPage;
     }
-    cancelPageTransition();
-    if (deviceSettingsScreen) {
-      renderDeviceSettings();
-    } else {
-      renderCurrent();
-    }
-    lastPageChangeAt = millis();
-    contentWasRendered = true;
-  }
 
-  if (pendingScreenRequest != ScreenRequest::None) {
-    const ScreenRequest request = pendingScreenRequest;
-    pendingScreenRequest = ScreenRequest::None;
-    if (!provisioningScreen) {
+    bool contentWasRendered = false;
+    if (contentDirty && !provisioningScreen &&
+        pageTransitionPhase == PageTransitionPhase::Idle) {
+      contentDirty = false;
+      // A storage or playlist change may make previously skipped pages usable.
+      // Let the next playback render re-evaluate availability even if settings
+      // currently owns the screen.
+      playableContentUnavailable = false;
+      lv_img_cache_invalidate_src(nullptr);
+      dropUnreferencedCachedImages();
+      const size_t pageCount = appConfig.pageCount();
+      if (pageCount == 0) {
+        currentPage = 0;
+        resumeContentPage = 1;
+      } else {
+        if (currentPage == 0 || currentPage > pageCount) {
+          currentPage = min(resumeContentPage, pageCount);
+          if (currentPage == 0) {
+            currentPage = 1;
+          }
+        }
+        resumeContentPage = currentPage;
+      }
+      cancelPageTransition();
+      if (deviceSettingsScreen) {
+        renderDeviceSettings();
+      } else {
+        renderCurrent();
+      }
+      lastPageChangeAt = millis();
+      contentWasRendered = true;
+    }
+
+    if (pendingScreenRequest != ScreenRequest::None) {
+      const ScreenRequest request = pendingScreenRequest;
+      pendingScreenRequest = ScreenRequest::None;
+      if (!provisioningScreen) {
+        deviceSettingsDirty = false;
+        cancelPageTransition();
+        if (request == ScreenRequest::DeviceSettings) {
+          renderDeviceSettings();
+        } else {
+          // Keep the logical page index in sync with the QR screen. Rendering
+          // it directly leaves currentPage pointing at the previous content,
+          // so the five-second autoplay path can win over the QR page's
+          // ten-second idle timeout.
+          showSystemPage();
+        }
+        lastTouchAt = millis();
+        lastPageChangeAt = lastTouchAt;
+        contentWasRendered = true;
+      }
+    }
+
+    if (deviceSettingsDirty && !provisioningScreen) {
       deviceSettingsDirty = false;
       cancelPageTransition();
-      if (request == ScreenRequest::DeviceSettings) {
+      if (deviceSettingsScreen) {
         renderDeviceSettings();
+      } else {
+        renderCurrent();
+      }
+      lastPageChangeAt = millis();
+      contentWasRendered = true;
+    }
+
+    if (pendingSystemPage && !provisioningScreen) {
+      pendingSystemPage = false;
+      pendingSwipe = 0;
+      cancelPageTransition();
+      showSystemPage();
+      contentWasRendered = true;
+    } else if (pendingSwipe != 0 && !contentWasRendered &&
+               !provisioningScreen &&
+               pageTransitionPhase == PageTransitionPhase::Idle) {
+      queuedDirection = pendingSwipe;
+      pendingSwipe = 0;
+    }
+
+    updatePageTransition(now);
+    if (scheduledScreenOff && scheduledBacklightFade.update(now)) {
+      backlightApply();
+    }
+
+    if (!contentWasRendered && !provisioningScreen &&
+        pageTransitionPhase == PageTransitionPhase::Idle &&
+        deviceSettingsScreen &&
+        now - lastTouchAt >= SETTINGS_IDLE_TIMEOUT_MS) {
+      deviceSettingsScreen = false;
+      activeSettingsEditor = SettingsEditor::None;
+      if (appConfig.pageCount() > 0) {
+        resumePlayback();
       } else {
         renderSystemPage();
       }
-      lastTouchAt = millis();
-      lastPageChangeAt = lastTouchAt;
       contentWasRendered = true;
-    }
-  }
-
-  if (deviceSettingsDirty && !provisioningScreen) {
-    deviceSettingsDirty = false;
-    cancelPageTransition();
-    if (deviceSettingsScreen) {
-      renderDeviceSettings();
-    } else {
-      renderCurrent();
-    }
-    lastPageChangeAt = millis();
-    contentWasRendered = true;
-  }
-
-  if (pendingSystemPage && !provisioningScreen) {
-    pendingSystemPage = false;
-    pendingSwipe = 0;
-    cancelPageTransition();
-    showSystemPage();
-    contentWasRendered = true;
-  } else if (pendingSwipe != 0 && !provisioningScreen) {
-    const int8_t direction = pendingSwipe;
-    pendingSwipe = 0;
-    changePage(direction, now);
-  }
-
-  updatePageTransition(now);
-  if (scheduledScreenOff && scheduledBacklightFade.update(now)) {
-    backlightApply();
-  }
-
-  if (!contentWasRendered && !provisioningScreen &&
-      pageTransitionPhase == PageTransitionPhase::Idle &&
-      deviceSettingsScreen &&
-      now - lastTouchAt >= SETTINGS_IDLE_TIMEOUT_MS) {
-    deviceSettingsScreen = false;
-    activeSettingsEditor = SettingsEditor::None;
-    if (appConfig.pageCount() > 0) {
+    } else if (!contentWasRendered && !provisioningScreen &&
+               pageTransitionPhase == PageTransitionPhase::Idle &&
+               !playableContentUnavailable &&
+               appConfig.pageCount() > 0 && currentPage == 0 &&
+               now - lastTouchAt >= SYSTEM_PAGE_IDLE_TIMEOUT_MS) {
       resumePlayback();
-    } else {
-      renderSystemPage();
+      contentWasRendered = true;
+    } else if (queuedDirection == 0 && pendingSwipe == 0 &&
+               !contentWasRendered && !provisioningScreen &&
+               !deviceSettingsScreen &&
+               pageTransitionPhase == PageTransitionPhase::Idle &&
+               appConfig.pageCount() > 0 && currentPage != 0 &&
+               now - lastPageChangeAt >= currentPageDwellMs()) {
+      queuedDirection = 1;
     }
-    contentWasRendered = true;
-  } else if (!contentWasRendered && !provisioningScreen &&
-             pageTransitionPhase == PageTransitionPhase::Idle &&
-             !playableContentUnavailable &&
-             appConfig.pageCount() > 0 && currentPage == 0 &&
-             now - lastTouchAt >= SYSTEM_PAGE_IDLE_TIMEOUT_MS) {
-    resumePlayback();
-    contentWasRendered = true;
-  } else if (!contentWasRendered && !provisioningScreen &&
-             pageTransitionPhase == PageTransitionPhase::Idle &&
-             appConfig.pageCount() > 0 && currentPage != 0 &&
-             now - lastPageChangeAt >= currentPageDwellMs()) {
-    changePage(1, now);
+
+    if (queuedDirection != 0 &&
+        pageTransitionPhase == PageTransitionPhase::Idle) {
+      if (slideNeedsWarm(queuedDirection)) {
+        // A card move may still be fading from the previous loop. Settle it
+        // before pausing the LVGL worker so TRIPLE_FULL does not flush an
+        // opacity frame while the incoming image is being warmed.
+        finishPlaybackClockFade();
+        warmBeforeChange = true;
+      } else {
+        changePage(queuedDirection, now);
+        queuedDirection = 0;
+      }
+    }
+
+    if (now - lastClockRefreshAt >= CLOCK_REFRESH_INTERVAL_MS) {
+      lastClockRefreshAt = now;
+      if (!warmBeforeChange &&
+          pageTransitionPhase != PageTransitionPhase::Sliding) {
+        updateLiveClock();
+      }
+      refreshScheduledBacklight();
+    }
+
+    // A page may have loaded while another request owned the worker. Retry
+    // scheduling missing summaries without rebuilding the image or its GIF.
+    if (!contentWasRendered && narrationGesturePageId() != 0 &&
+        now - lastNarrationCheckAt >= 1000) {
+      lastNarrationCheckAt = now;
+      requestImageNarration(appConfig.page(currentPage - 1));
+    }
+
+    if (!contentWasRendered && narrationGesturePageId() != 0 &&
+        now - lastNarrationStatusAt >= 200) {
+      lastNarrationStatusAt = now;
+      refreshImageNarration(lv_scr_act(), appConfig.page(currentPage - 1));
+    }
+
+    // Warm the neighbouring pages only once the current one has settled. This
+    // still runs under the LVGL lock -- the cache is shared with the render
+    // path -- but by then the frame is static, so blocking the worker for the
+    // duration of one 450 KB read costs nothing visible. Signed comparisons
+    // because the branches above may have moved lastPageChangeAt past `now`.
+    const uint32_t preloadNow = millis();
+    if (!warmBeforeChange && !contentWasRendered && !provisioningScreen &&
+        pendingSwipe == 0 && !pendingSystemPage &&
+        pageTransitionPhase == PageTransitionPhase::Idle &&
+        static_cast<int32_t>(preloadNow - lastPageChangeAt) >=
+            static_cast<int32_t>(IMAGE_PRELOAD_IDLE_DELAY_MS) &&
+        static_cast<int32_t>(preloadNow - lastPreloadAt) >=
+            static_cast<int32_t>(IMAGE_PRELOAD_MIN_INTERVAL_MS) &&
+        preloadOneNeighbourImage(currentPage)) {
+      lastPreloadAt = millis();
+    }
+
+    if (!scheduledScreenOff && !storageBlankActive && backlightResumeAt != 0 &&
+        static_cast<int32_t>(now - backlightResumeAt) >= 0) {
+      backlightResumeAt = 0;
+      backlightApply();
+    }
+
+    if (!contentWasRendered && !warmBeforeChange) {
+      updatePlaybackClockPosition(millis());
+    }
   }
 
-  if (now - lastClockRefreshAt >= CLOCK_REFRESH_INTERVAL_MS) {
-    lastClockRefreshAt = now;
-    updateLiveClock();
-    refreshScheduledBacklight();
+  if (!warmBeforeChange || queuedDirection == 0) {
+    return;
   }
 
-  // Warm the neighbouring pages only once the current one has settled. This
-  // still runs under the LVGL lock -- the cache is shared with the render
-  // path -- but by then the frame is static, so blocking the worker for the
-  // duration of one 450 KB read costs nothing visible. Signed comparisons
-  // because the branches above may have moved lastPageChangeAt past `now`.
-  const uint32_t preloadNow = millis();
-  if (!contentWasRendered && !provisioningScreen && pendingSwipe == 0 &&
-      !pendingSystemPage &&
-      pageTransitionPhase == PageTransitionPhase::Idle &&
-      static_cast<int32_t>(preloadNow - lastPageChangeAt) >=
-          static_cast<int32_t>(IMAGE_PRELOAD_IDLE_DELAY_MS) &&
-      static_cast<int32_t>(preloadNow - lastPreloadAt) >=
-          static_cast<int32_t>(IMAGE_PRELOAD_MIN_INTERVAL_MS) &&
-      preloadOneNeighbourImage(currentPage)) {
-    lastPreloadAt = millis();
+  // Decode the incoming still while the current frame keeps scanning out.
+  // Doing that under the live LVGL lock starved the RGB bounce buffer and
+  // made the slide hitch at the start of a cache miss.
+  if (!espDisplayStackPause()) {
+    Serial.println("[display] unable to pause LVGL worker to warm slide images");
   }
-
-  if (!scheduledScreenOff && !storageBlankActive && backlightResumeAt != 0 &&
-      static_cast<int32_t>(now - backlightResumeAt) >= 0) {
-    backlightResumeAt = 0;
-    backlightApply();
+  {
+    LvglLockGuard guard;
+    if (guard.locked()) {
+      warmSlideImages(queuedDirection);
+    }
   }
-
-  if (!contentWasRendered) {
-    updatePlaybackClockPosition(millis());
+  if (!espDisplayStackResume()) {
+    Serial.println(
+        "[display] unable to resume LVGL worker after warming slide images");
+  }
+  {
+    LvglLockGuard guard;
+    if (guard.locked()) {
+      changePage(queuedDirection, millis());
+      updatePageTransition(millis());
+    }
   }
 }
 
@@ -3310,4 +3744,13 @@ size_t displayCurrentPage() {
     return 0;
   }
   return currentPage;
+}
+
+bool displaySlideInProgress() {
+  if (!espDisplayStackLock(0)) {
+    return true;
+  }
+  const bool sliding = pageTransitionPhase == PageTransitionPhase::Sliding;
+  espDisplayStackUnlock();
+  return sliding;
 }

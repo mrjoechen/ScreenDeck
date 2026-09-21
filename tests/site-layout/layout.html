@@ -36,6 +36,19 @@
         });
       }
 
+      // Headless Chrome may pause animation frames in hidden/offscreen frames.
+      // Geometry reads below force layout; a bounded fallback avoids hanging
+      // the harness without skipping any of its layout assertions.
+      function waitForLayout(view) {
+        return new Promise((resolve) => {
+          const timeout = window.setTimeout(resolve, 100);
+          view.requestAnimationFrame(() => view.requestAnimationFrame(() => {
+            window.clearTimeout(timeout);
+            resolve();
+          }));
+        });
+      }
+
       async function capture(width) {
         const frame = document.createElement("iframe");
         frame.width = String(width);
@@ -50,10 +63,10 @@
           new Promise((resolve) => window.setTimeout(resolve, 1200)),
         ]);
         for (let attempt = 0; attempt < 80; attempt += 1) {
-          if (page.querySelector("#registryState[data-state='ready'], #registryState[data-state='error']")) break;
+          if (page.querySelector("#registryState[data-state='ready'], #registryState[data-state='error'], #registryState[data-state='empty']")) break;
           await new Promise((resolve) => window.setTimeout(resolve, 25));
         }
-        await new Promise((resolve) => view.requestAnimationFrame(() => view.requestAnimationFrame(resolve)));
+        await waitForLayout(view);
 
         const box = (selector) => {
           const node = page.querySelector(selector);
@@ -153,7 +166,7 @@
         svg.setAttribute("height", "900");
         svg.style.cssText = "position:absolute;left:-20000px;top:0;visibility:hidden";
         document.body.append(svg);
-        await new Promise((resolve) => requestAnimationFrame(resolve));
+        await waitForLayout(window);
 
         const node = (selector) => {
           const element = svg.querySelector(selector);

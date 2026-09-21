@@ -6,6 +6,7 @@
 
 #include "app_config.h"
 #include "display_ui.h"
+#include "llm_narration.h"
 #include "media_store.h"
 #include "screendeck_version.h"
 #include "weather.h"
@@ -85,6 +86,7 @@ void startOnline() {
   }
   webPortal.begin(false);
   weatherBegin();
+  llmNarrationBegin();
   displayShowContent(0);
   Serial.printf("[wifi] connected to %s\n", WiFi.SSID().c_str());
   Serial.printf("[wifi] IP: %s\n", WiFi.localIP().toString().c_str());
@@ -143,11 +145,37 @@ void setup() {
 
 void loop() {
   displayLoop();
+  llmNarrationLoop();
+  if (!displaySlideInProgress()) {
+    uint32_t narrationPageId = 0;
+    String narrationPath;
+    String narrationText;
+    if (llmNarrationTakeResult(narrationPageId, narrationPath,
+                               narrationText)) {
+      displayBeginStorageWrite(false);
+      const bool saved = appConfig.setImageNarration(
+          narrationPageId, narrationPath, narrationText);
+      const bool obsolete = !appConfig.imageNarrationTargetExists(
+          narrationPageId, narrationPath);
+      if (saved || obsolete) {
+        llmNarrationAcknowledgeResult();
+      }
+      displayEndStorageWrite();
+      if (saved && appConfig.imageNarrationEnabled()) {
+        displayMarkContentDirty();
+      } else if (!saved) {
+        Serial.println(
+            obsolete ? "[narration] result discarded because the image page changed"
+                     : "[narration] save failed; retaining result for local retry");
+      }
+    }
+  }
   weatherLoop(appConfig.showWeather());
   if (weatherTakeDisplayUpdate()) {
     displayMarkContentDirty();
   }
-  if (mediaStoreTakeSdRemovalDetected()) {
+  if (!llmNarrationMediaReadInProgress() &&
+      mediaStoreTakeSdRemovalDetected()) {
     // The failing LVGL/VFS callback has returned before this event is
     // consumed. Close its decoder and file handles before invalidating the
     // FatFS mount; tearing SD down inside the callback would race the worker.
@@ -155,7 +183,7 @@ void loop() {
     mediaStoreUnmountSd();
     displayMarkContentDirty();
   }
-  if (displayTakeSdRescanRequest()) {
+  if (!llmNarrationMediaReadInProgress() && displayTakeSdRescanRequest()) {
     mediaStoreUnmountSd();
     mediaStoreMountSd();
     displayMarkContentDirty();
@@ -171,7 +199,9 @@ void loop() {
     Serial.println("[wifi] unable to clear saved settings; restart cancelled");
     displayReportWifiResetFailure();
   }
-  webPortal.loop();
+  if (!displaySlideInProgress()) {
+    webPortal.loop();
+  }
 
   if (webPortal.restartRequested()) {
     displayShowBootMessage(uiText("正在重启", "Restarting"),

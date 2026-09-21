@@ -3,8 +3,8 @@
  * Bpp: 4
  * Source: Noto Emoji (SIL Open Font License 1.1)
  * https://github.com/google/fonts/tree/main/ofl/notoemoji
- * Generated with lv_font_conv 1.5.3 at 32 px / 4 bpp, with the built-in
- * SimSun CJK font as fallback.
+ * Generated with lv_font_conv 1.5.3 at 32 px / 4 bpp, with MiSans
+ * Chinese/English as fallback. Sparse cmaps avoid false hits in LVGL 8.
  ******************************************************************************/
 
 #ifdef LV_LVGL_H_INCLUDE_SIMPLE
@@ -98536,188 +98536,110 @@ static const lv_font_fmt_txt_glyph_dsc_t glyph_dsc[] = {
  *--------------------*/
 
 static const uint16_t unicode_list_0[] = {
-    0x0, 0x5, 0x1f93, 0x1fa0, 0x203a, 0x2079, 0x2090, 0x20eb,
-    0x20ec, 0x20ed, 0x20ee, 0x20ef, 0x20f0, 0x2100, 0x2101, 0x2271,
-    0x2272, 0x227f, 0x2326, 0x2340, 0x2341, 0x2342, 0x2343, 0x2344,
-    0x2345, 0x2346, 0x2347, 0x2348, 0x2349, 0x234a, 0x234f, 0x2350,
-    0x2351, 0x2419, 0x2501, 0x2502, 0x250d, 0x2517, 0x2552, 0x2553,
-    0x2554, 0x2555, 0x2557, 0x2558, 0x2559, 0x255a, 0x255b, 0x2565,
-    0x2568, 0x256b, 0x256c, 0x256f, 0x2574, 0x2577, 0x2579, 0x257a,
-    0x257d, 0x2581, 0x2585, 0x2586, 0x258f, 0x2590, 0x2591, 0x2597,
-    0x2599, 0x259f, 0x25a0, 0x25a1, 0x25a2, 0x25a3, 0x25a4, 0x25a5,
-    0x25a6, 0x25a7, 0x25a8, 0x25a9, 0x25aa, 0x25b6, 0x25b7, 0x25ba,
-    0x25bc, 0x25bd, 0x25bf, 0x25d2, 0x25d5, 0x25d6, 0x25e9, 0x25ea,
-    0x25eb, 0x25ec, 0x25ed, 0x25ee, 0x25f0, 0x25f2, 0x25f3, 0x25f7,
-    0x25f8, 0x25fe, 0x2601, 0x2602, 0x2607, 0x2608, 0x2614, 0x2615,
-    0x261b, 0x261c, 0x261f, 0x2625, 0x2626, 0x2628, 0x262a, 0x262b,
-    0x2640, 0x2641, 0x2647, 0x2648, 0x2649, 0x264a, 0x264b, 0x264c,
-    0x264e, 0x264f, 0x2650, 0x2651, 0x2654, 0x2659, 0x265c, 0x265f,
-    0x2660, 0x2661, 0x2662, 0x2663, 0x2664, 0x2666, 0x2669, 0x266b,
-    0x266d, 0x2674, 0x2678, 0x267f, 0x268a, 0x268b, 0x269b, 0x269e,
-    0x26a3, 0x26a5, 0x26aa, 0x26ab, 0x26ac, 0x26ae, 0x26ba, 0x26bb,
-    0x26ec, 0x26ed, 0x26ee, 0x26f8, 0x2707, 0x2716, 0x288b, 0x288c,
-    0x2a5c, 0x2a5d, 0x2a5e, 0x2a72, 0x2a73, 0x2aa7, 0x2aac, 0x2f87,
-    0x2f94, 0x31ee, 0x31f0
+    0, 5, 8083, 8096, 8250, 8313, 8336, 8427, 8428, 8429, 8430, 8431, 8432, 8448, 8449, 8817,
+    8818, 8831, 8998, 9024, 9025, 9026, 9027, 9028, 9029, 9030, 9031, 9032, 9033, 9034, 9039, 9040,
+    9041, 9241, 9473, 9474, 9485, 9495, 9554, 9555, 9556, 9557, 9559, 9560, 9561, 9562, 9563, 9573,
+    9576, 9579, 9580, 9583, 9588, 9591, 9593, 9594, 9597, 9601, 9605, 9606, 9615, 9616, 9617, 9623,
+    9625, 9631, 9632, 9633, 9634, 9635, 9636, 9637, 9638, 9639, 9640, 9641, 9642, 9654, 9655, 9658,
+    9660, 9661, 9663, 9682, 9685, 9686, 9705, 9706, 9707, 9708, 9709, 9710, 9712, 9714, 9715, 9719,
+    9720, 9726, 9729, 9730, 9735, 9736, 9748, 9749, 9755, 9756, 9759, 9765, 9766, 9768, 9770, 9771,
+    9792, 9793, 9799, 9800, 9801, 9802, 9803, 9804, 9806, 9807, 9808, 9809, 9812, 9817, 9820, 9823,
+    9824, 9825, 9826, 9827, 9828, 9830, 9833, 9835, 9837, 9844, 9848, 9855, 9866, 9867, 9883, 9886,
+    9891, 9893, 9898, 9899, 9900, 9902, 9914, 9915, 9964, 9965, 9966, 9976, 9991, 10006, 10379, 10380,
+    10844, 10845, 10846, 10866, 10867, 10919, 10924, 12167, 12180, 12782, 12784,
 };
 
 static const uint16_t unicode_list_1[] = {
-    0x0, 0xcb, 0x16c, 0x16d, 0x17a, 0x17b, 0x18a
+    0, 203, 364, 365, 378, 379, 394, 397, 398, 399, 400, 401, 402, 403, 404, 405,
+    406, 482, 483, 484, 485, 486, 487, 488, 489, 490, 491, 492, 493, 494, 495, 496,
+    497, 498, 499, 500, 501, 502, 503, 504, 505, 506, 507, 509, 510, 534, 555, 558,
+    559, 560, 561, 562, 563, 564, 565, 566, 588, 589, 764, 765, 766, 767, 768, 769,
+    770, 771, 772, 773, 774, 775, 776, 777, 778, 779, 780, 781, 782, 783, 784, 785,
+    786, 787, 788, 789, 790, 791, 792, 793, 794, 795, 796, 797, 800, 801, 802, 803,
+    804, 805, 806, 807, 808, 809, 810, 811, 812, 813, 814, 815, 816, 817, 818, 819,
+    820, 821, 822, 823, 824, 825, 826, 827, 828, 829, 830, 831, 832, 833, 834, 835,
+    836, 837, 838, 839, 840, 841, 842, 843, 844, 845, 846, 847, 848, 849, 850, 851,
+    852, 853, 854, 855, 856, 857, 858, 859, 860, 861, 862, 863, 864, 865, 866, 867,
+    868, 869, 870, 871, 872, 873, 874, 875, 876, 877, 878, 879, 880, 881, 882, 883,
+    884, 885, 886, 887, 888, 889, 890, 891, 892, 893, 894, 895, 896, 897, 898, 899,
+    900, 901, 902, 903, 904, 905, 906, 907, 908, 909, 910, 911, 914, 915, 917, 918,
+    919, 922, 923, 924, 925, 926, 927, 928, 929, 930, 931, 932, 933, 934, 935, 936,
+    937, 938, 939, 940, 941, 942, 943, 944, 945, 946, 947, 948, 949, 950, 951, 952,
+    953, 954, 955, 956, 957, 958, 959, 960, 961, 962, 963, 964, 965, 966, 967, 968,
+    969, 970, 971, 972, 973, 974, 975, 976, 977, 978, 979, 980, 981, 982, 983, 984,
+    985, 986, 987, 988, 989, 990, 991, 992, 993, 994, 995, 996, 997, 998, 999, 1000,
+    1001, 1002, 1003, 1004, 1007, 1008, 1009, 1011, 1012, 1013, 1014, 1015, 1016, 1017, 1018, 1019,
+    1020, 1021, 1022, 1023, 1024, 1025, 1026, 1027, 1028, 1029, 1030, 1031, 1032, 1033, 1034, 1035,
+    1036, 1037, 1038, 1039, 1040, 1041, 1042, 1043, 1044, 1045, 1046, 1047, 1048, 1049, 1050, 1051,
+    1052, 1053, 1054, 1055, 1056, 1057, 1058, 1059, 1060, 1061, 1062, 1063, 1064, 1065, 1066, 1067,
+    1068, 1069, 1070, 1071, 1072, 1073, 1074, 1075, 1076, 1077, 1078, 1079, 1080, 1081, 1082, 1083,
+    1084, 1085, 1086, 1087, 1088, 1089, 1090, 1091, 1092, 1093, 1094, 1095, 1096, 1097, 1098, 1099,
+    1100, 1101, 1102, 1103, 1104, 1105, 1106, 1107, 1108, 1109, 1110, 1111, 1112, 1113, 1114, 1115,
+    1116, 1117, 1118, 1119, 1120, 1121, 1122, 1123, 1124, 1125, 1126, 1127, 1128, 1129, 1130, 1131,
+    1132, 1133, 1134, 1135, 1136, 1137, 1138, 1139, 1140, 1141, 1142, 1143, 1144, 1145, 1146, 1147,
+    1148, 1149, 1150, 1151, 1152, 1153, 1154, 1155, 1156, 1157, 1158, 1159, 1160, 1161, 1162, 1163,
+    1164, 1165, 1166, 1167, 1168, 1169, 1170, 1171, 1172, 1173, 1174, 1175, 1176, 1177, 1178, 1179,
+    1180, 1181, 1182, 1183, 1184, 1185, 1186, 1187, 1188, 1189, 1190, 1191, 1192, 1193, 1194, 1195,
+    1196, 1197, 1198, 1199, 1200, 1201, 1202, 1203, 1204, 1205, 1206, 1207, 1208, 1209, 1210, 1211,
+    1212, 1213, 1214, 1215, 1216, 1217, 1218, 1219, 1220, 1221, 1222, 1223, 1224, 1225, 1226, 1227,
+    1228, 1229, 1230, 1231, 1232, 1233, 1234, 1235, 1236, 1237, 1238, 1239, 1240, 1241, 1242, 1243,
+    1244, 1245, 1246, 1247, 1248, 1249, 1250, 1251, 1252, 1253, 1254, 1255, 1256, 1257, 1258, 1259,
+    1260, 1261, 1262, 1263, 1264, 1265, 1266, 1267, 1268, 1269, 1270, 1271, 1272, 1273, 1275, 1276,
+    1277, 1278, 1279, 1280, 1281, 1282, 1283, 1284, 1285, 1286, 1287, 1288, 1289, 1290, 1291, 1292,
+    1293, 1294, 1295, 1296, 1297, 1298, 1299, 1300, 1301, 1302, 1303, 1304, 1305, 1306, 1307, 1308,
+    1309, 1310, 1311, 1312, 1313, 1314, 1315, 1316, 1317, 1318, 1319, 1320, 1321, 1322, 1323, 1324,
+    1325, 1326, 1327, 1328, 1329, 1330, 1331, 1332, 1333, 1334, 1335, 1336, 1337, 1349, 1350, 1351,
+    1352, 1353, 1354, 1356, 1357, 1358, 1359, 1360, 1361, 1362, 1363, 1364, 1365, 1366, 1367, 1368,
+    1369, 1370, 1371, 1372, 1373, 1374, 1375, 1376, 1377, 1378, 1379, 1387, 1388, 1391, 1392, 1393,
+    1394, 1395, 1396, 1397, 1398, 1411, 1414, 1415, 1416, 1417, 1420, 1425, 1426, 1440, 1441, 1444,
+    1453, 1454, 1464, 1470, 1471, 1472, 1485, 1486, 1487, 1496, 1497, 1498, 1501, 1503, 1508, 1515,
+    1519, 1526, 1527, 1528, 1529, 1530, 1531, 1532, 1533, 1534, 1535, 1536, 1537, 1538, 1539, 1540,
+    1541, 1542, 1543, 1544, 1545, 1546, 1547, 1548, 1549, 1550, 1551, 1552, 1553, 1554, 1555, 1556,
+    1557, 1558, 1559, 1560, 1561, 1562, 1563, 1564, 1565, 1566, 1567, 1568, 1569, 1570, 1571, 1572,
+    1573, 1574, 1575, 1576, 1577, 1578, 1579, 1580, 1581, 1582, 1583, 1584, 1585, 1586, 1587, 1588,
+    1589, 1590, 1591, 1592, 1593, 1594, 1595, 1596, 1597, 1598, 1599, 1600, 1601, 1602, 1603, 1604,
+    1605, 1606, 1607, 1608, 1609, 1610, 1611, 1660, 1661, 1662, 1663, 1664, 1665, 1666, 1667, 1668,
+    1669, 1670, 1671, 1672, 1673, 1674, 1675, 1676, 1677, 1678, 1679, 1680, 1681, 1682, 1683, 1684,
+    1685, 1686, 1687, 1688, 1689, 1690, 1691, 1692, 1693, 1694, 1695, 1696, 1697, 1698, 1699, 1700,
+    1701, 1702, 1703, 1704, 1705, 1706, 1707, 1708, 1709, 1710, 1711, 1712, 1713, 1714, 1715, 1716,
+    1717, 1718, 1719, 1720, 1721, 1722, 1723, 1724, 1725, 1726, 1727, 1728, 1729, 1735, 1736, 1737,
+    1738, 1739, 1740, 1741, 1742, 1745, 1746, 1747, 1752, 1753, 1754, 1755, 1756, 1757, 1758, 1759,
+    1760, 1761, 1765, 1767, 1768, 1772, 1775, 1776, 1777, 1778, 1779, 1780, 1781, 1782, 1783, 1784,
+    2012, 2013, 2014, 2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023, 2028, 2312, 2313, 2314,
+    2315, 2316, 2317, 2318, 2319, 2320, 2321, 2322, 2323, 2324, 2325, 2326, 2327, 2328, 2329, 2330,
+    2331, 2332, 2333, 2334, 2335, 2336, 2337, 2338, 2339, 2340, 2341, 2342, 2343, 2344, 2345, 2346,
+    2347, 2348, 2349, 2350, 2351, 2352, 2353, 2354, 2355, 2356, 2357, 2358, 2360, 2361, 2362, 2363,
+    2364, 2365, 2366, 2367, 2368, 2369, 2371, 2372, 2373, 2374, 2375, 2376, 2377, 2378, 2379, 2380,
+    2381, 2382, 2383, 2384, 2385, 2386, 2387, 2388, 2389, 2390, 2391, 2392, 2393, 2394, 2395, 2396,
+    2397, 2398, 2399, 2400, 2401, 2402, 2403, 2404, 2405, 2406, 2407, 2408, 2409, 2410, 2411, 2412,
+    2413, 2414, 2415, 2416, 2417, 2418, 2419, 2420, 2421, 2422, 2423, 2424, 2425, 2426, 2427, 2428,
+    2429, 2430, 2431, 2432, 2433, 2434, 2435, 2436, 2437, 2438, 2439, 2440, 2441, 2442, 2443, 2444,
+    2445, 2446, 2447, 2448, 2449, 2450, 2451, 2452, 2453, 2454, 2455, 2456, 2457, 2458, 2459, 2460,
+    2461, 2462, 2463, 2464, 2465, 2466, 2467, 2468, 2469, 2470, 2471, 2472, 2473, 2474, 2475, 2476,
+    2477, 2478, 2479, 2480, 2481, 2482, 2483, 2484, 2485, 2486, 2487, 2488, 2489, 2490, 2491, 2492,
+    2493, 2494, 2495, 2496, 2497, 2498, 2499, 2500, 2501, 2502, 2503, 2504, 2505, 2506, 2507, 2508,
+    2509, 2510, 2511, 2512, 2513, 2514, 2515, 2516, 2517, 2518, 2519, 2520, 2521, 2522, 2523, 2524,
+    2525, 2526, 2527, 2528, 2529, 2530, 2531, 2532, 2533, 2534, 2535, 2536, 2537, 2538, 2539, 2540,
+    2541, 2542, 2543, 2544, 2545, 2546, 2547, 2548, 2549, 2550, 2551, 2552, 2553, 2554, 2555, 2668,
+    2669, 2670, 2671, 2672, 2673, 2674, 2675, 2676, 2677, 2678, 2679, 2680, 2684, 2685, 2686, 2687,
+    2688, 2689, 2690, 2691, 2692, 2700, 2701, 2702, 2703, 2704, 2705, 2706, 2707, 2708, 2709, 2710,
+    2711, 2712, 2713, 2714, 2715, 2716, 2717, 2718, 2719, 2720, 2721, 2722, 2723, 2724, 2725, 2726,
+    2727, 2728, 2729, 2730, 2731, 2732, 2733, 2734, 2735, 2736, 2737, 2738, 2739, 2740, 2741, 2742,
+    2743, 2744, 2745, 2747, 2748, 2749, 2750, 2751, 2752, 2753, 2762, 2763, 2764, 2765, 2766, 2767,
+    2768, 2769, 2770, 2771, 2772, 2773, 2774, 2775, 2780, 2781, 2782, 2783, 2784, 2785, 2786, 2787,
+    2788, 2796, 2797, 2798, 2799, 2800, 2801, 2802, 2803, 2804,
 };
 
-static const uint16_t unicode_list_4[] = {
-    0x0, 0x1, 0x19, 0x2e, 0x31, 0x32, 0x33, 0x34,
-    0x35, 0x36, 0x37, 0x38, 0x39, 0x4f, 0x50
-};
-
-static const uint8_t glyph_id_ofs_list_7[] = {
-    0, 1, 0, 2, 3, 4
-};
-
-static const uint8_t glyph_id_ofs_list_9[] = {
-    0, 1, 2, 0, 3, 4, 5, 6,
-    7, 8, 9
-};
-
-static const uint16_t unicode_list_14[] = {
-    0x0, 0x1, 0x4, 0x5, 0x6, 0x7, 0x8, 0x9,
-    0xa, 0xb, 0x18, 0x1b, 0x1c, 0x1d, 0x1e, 0x21,
-    0x26, 0x27, 0x35, 0x36, 0x39, 0x42, 0x43, 0x4d,
-    0x53, 0x54, 0x55, 0x62, 0x63, 0x64, 0x6d, 0x6e,
-    0x6f, 0x72, 0x74, 0x79, 0x80, 0x84
-};
-
-static const uint8_t glyph_id_ofs_list_17[] = {
-    0, 1, 2, 3, 4, 5, 6, 7,
-    0, 0, 8, 9, 10, 0, 0, 0,
-    0, 11, 12, 13, 14, 15, 16, 17,
-    18, 19, 20, 0, 0, 0, 21, 0,
-    22, 23, 0, 0, 0, 24, 0, 0,
-    25, 26, 27, 28, 29, 30, 31, 32,
-    33, 34
-};
-
-/*Collect the unicode lists and glyph_id offsets*/
-static const lv_font_fmt_txt_cmap_t cmaps[] =
-{
+static const lv_font_fmt_txt_cmap_t cmaps[] = {
     {
         .range_start = 169, .range_length = 12785, .glyph_id_start = 1,
-        .unicode_list = unicode_list_0, .glyph_id_ofs_list = NULL, .list_length = 171, .type = LV_FONT_FMT_TXT_CMAP_SPARSE_TINY
+        .unicode_list = unicode_list_0, .glyph_id_ofs_list = NULL, .list_length = 171,
+        .type = LV_FONT_FMT_TXT_CMAP_SPARSE_TINY
     },
     {
-        .range_start = 126980, .range_length = 395, .glyph_id_start = 172,
-        .unicode_list = unicode_list_1, .glyph_id_ofs_list = NULL, .list_length = 7, .type = LV_FONT_FMT_TXT_CMAP_SPARSE_TINY
-    },
-    {
-        .range_start = 127377, .range_length = 10, .glyph_id_start = 179,
-        .unicode_list = NULL, .glyph_id_ofs_list = NULL, .list_length = 0, .type = LV_FONT_FMT_TXT_CMAP_FORMAT0_TINY
-    },
-    {
-        .range_start = 127462, .range_length = 26, .glyph_id_start = 189,
-        .unicode_list = NULL, .glyph_id_ofs_list = NULL, .list_length = 0, .type = LV_FONT_FMT_TXT_CMAP_FORMAT0_TINY
-    },
-    {
-        .range_start = 127489, .range_length = 81, .glyph_id_start = 215,
-        .unicode_list = unicode_list_4, .glyph_id_ofs_list = NULL, .list_length = 15, .type = LV_FONT_FMT_TXT_CMAP_SPARSE_TINY
-    },
-    {
-        .range_start = 127744, .range_length = 34, .glyph_id_start = 230,
-        .unicode_list = NULL, .glyph_id_ofs_list = NULL, .list_length = 0, .type = LV_FONT_FMT_TXT_CMAP_FORMAT0_TINY
-    },
-    {
-        .range_start = 127780, .range_length = 112, .glyph_id_start = 264,
-        .unicode_list = NULL, .glyph_id_ofs_list = NULL, .list_length = 0, .type = LV_FONT_FMT_TXT_CMAP_FORMAT0_TINY
-    },
-    {
-        .range_start = 127894, .range_length = 6, .glyph_id_start = 376,
-        .unicode_list = NULL, .glyph_id_ofs_list = glyph_id_ofs_list_7, .list_length = 6, .type = LV_FONT_FMT_TXT_CMAP_FORMAT0_FULL
-    },
-    {
-        .range_start = 127902, .range_length = 83, .glyph_id_start = 381,
-        .unicode_list = NULL, .glyph_id_ofs_list = NULL, .list_length = 0, .type = LV_FONT_FMT_TXT_CMAP_FORMAT0_TINY
-    },
-    {
-        .range_start = 127987, .range_length = 11, .glyph_id_start = 464,
-        .unicode_list = NULL, .glyph_id_ofs_list = glyph_id_ofs_list_9, .list_length = 11, .type = LV_FONT_FMT_TXT_CMAP_FORMAT0_FULL
-    },
-    {
-        .range_start = 127998, .range_length = 256, .glyph_id_start = 474,
-        .unicode_list = NULL, .glyph_id_ofs_list = NULL, .list_length = 0, .type = LV_FONT_FMT_TXT_CMAP_FORMAT0_TINY
-    },
-    {
-        .range_start = 128255, .range_length = 63, .glyph_id_start = 730,
-        .unicode_list = NULL, .glyph_id_ofs_list = NULL, .list_length = 0, .type = LV_FONT_FMT_TXT_CMAP_FORMAT0_TINY
-    },
-    {
-        .range_start = 128329, .range_length = 6, .glyph_id_start = 793,
-        .unicode_list = NULL, .glyph_id_ofs_list = NULL, .list_length = 0, .type = LV_FONT_FMT_TXT_CMAP_FORMAT0_TINY
-    },
-    {
-        .range_start = 128336, .range_length = 24, .glyph_id_start = 799,
-        .unicode_list = NULL, .glyph_id_ofs_list = NULL, .list_length = 0, .type = LV_FONT_FMT_TXT_CMAP_FORMAT0_TINY
-    },
-    {
-        .range_start = 128367, .range_length = 133, .glyph_id_start = 823,
-        .unicode_list = unicode_list_14, .glyph_id_ofs_list = NULL, .list_length = 38, .type = LV_FONT_FMT_TXT_CMAP_SPARSE_TINY
-    },
-    {
-        .range_start = 128506, .range_length = 86, .glyph_id_start = 861,
-        .unicode_list = NULL, .glyph_id_ofs_list = NULL, .list_length = 0, .type = LV_FONT_FMT_TXT_CMAP_FORMAT0_TINY
-    },
-    {
-        .range_start = 128640, .range_length = 70, .glyph_id_start = 947,
-        .unicode_list = NULL, .glyph_id_ofs_list = NULL, .list_length = 0, .type = LV_FONT_FMT_TXT_CMAP_FORMAT0_TINY
-    },
-    {
-        .range_start = 128715, .range_length = 50, .glyph_id_start = 1017,
-        .unicode_list = NULL, .glyph_id_ofs_list = glyph_id_ofs_list_17, .list_length = 50, .type = LV_FONT_FMT_TXT_CMAP_FORMAT0_FULL
-    },
-    {
-        .range_start = 128992, .range_length = 12, .glyph_id_start = 1052,
-        .unicode_list = NULL, .glyph_id_ofs_list = NULL, .list_length = 0, .type = LV_FONT_FMT_TXT_CMAP_FORMAT0_TINY
-    },
-    {
-        .range_start = 129008, .range_length = 1, .glyph_id_start = 1064,
-        .unicode_list = NULL, .glyph_id_ofs_list = NULL, .list_length = 0, .type = LV_FONT_FMT_TXT_CMAP_FORMAT0_TINY
-    },
-    {
-        .range_start = 129292, .range_length = 47, .glyph_id_start = 1065,
-        .unicode_list = NULL, .glyph_id_ofs_list = NULL, .list_length = 0, .type = LV_FONT_FMT_TXT_CMAP_FORMAT0_TINY
-    },
-    {
-        .range_start = 129340, .range_length = 10, .glyph_id_start = 1112,
-        .unicode_list = NULL, .glyph_id_ofs_list = NULL, .list_length = 0, .type = LV_FONT_FMT_TXT_CMAP_FORMAT0_TINY
-    },
-    {
-        .range_start = 129351, .range_length = 185, .glyph_id_start = 1122,
-        .unicode_list = NULL, .glyph_id_ofs_list = NULL, .list_length = 0, .type = LV_FONT_FMT_TXT_CMAP_FORMAT0_TINY
-    },
-    {
-        .range_start = 129648, .range_length = 13, .glyph_id_start = 1307,
-        .unicode_list = NULL, .glyph_id_ofs_list = NULL, .list_length = 0, .type = LV_FONT_FMT_TXT_CMAP_FORMAT0_TINY
-    },
-    {
-        .range_start = 129664, .range_length = 9, .glyph_id_start = 1320,
-        .unicode_list = NULL, .glyph_id_ofs_list = NULL, .list_length = 0, .type = LV_FONT_FMT_TXT_CMAP_FORMAT0_TINY
-    },
-    {
-        .range_start = 129680, .range_length = 46, .glyph_id_start = 1329,
-        .unicode_list = NULL, .glyph_id_ofs_list = NULL, .list_length = 0, .type = LV_FONT_FMT_TXT_CMAP_FORMAT0_TINY
-    },
-    {
-        .range_start = 129727, .range_length = 7, .glyph_id_start = 1375,
-        .unicode_list = NULL, .glyph_id_ofs_list = NULL, .list_length = 0, .type = LV_FONT_FMT_TXT_CMAP_FORMAT0_TINY
-    },
-    {
-        .range_start = 129742, .range_length = 14, .glyph_id_start = 1382,
-        .unicode_list = NULL, .glyph_id_ofs_list = NULL, .list_length = 0, .type = LV_FONT_FMT_TXT_CMAP_FORMAT0_TINY
-    },
-    {
-        .range_start = 129760, .range_length = 9, .glyph_id_start = 1396,
-        .unicode_list = NULL, .glyph_id_ofs_list = NULL, .list_length = 0, .type = LV_FONT_FMT_TXT_CMAP_FORMAT0_TINY
-    },
-    {
-        .range_start = 129776, .range_length = 9, .glyph_id_start = 1405,
-        .unicode_list = NULL, .glyph_id_ofs_list = NULL, .list_length = 0, .type = LV_FONT_FMT_TXT_CMAP_FORMAT0_TINY
+        .range_start = 126980, .range_length = 2805, .glyph_id_start = 172,
+        .unicode_list = unicode_list_1, .glyph_id_ofs_list = NULL, .list_length = 1242,
+        .type = LV_FONT_FMT_TXT_CMAP_SPARSE_TINY
     }
 };
 
@@ -98742,7 +98664,7 @@ static lv_font_fmt_txt_dsc_t font_dsc = {
     .cmaps = cmaps,
     .kern_dsc = NULL,
     .kern_scale = 0,
-    .cmap_num = 30,
+    .cmap_num = 2,
     .bpp = 4,
     .kern_classes = 0,
     .bitmap_format = 0,
@@ -98751,7 +98673,7 @@ static lv_font_fmt_txt_dsc_t font_dsc = {
 #endif
 };
 
-extern const lv_font_t lv_font_simsun_16_cjk;
+extern const lv_font_t ui_font_misans_16;
 
 
 /*-----------------
@@ -98777,7 +98699,7 @@ lv_font_t ui_font_emoji_32 = {
 #endif
     .dsc = &font_dsc,          /*The custom font data. Will be accessed by `get_glyph_bitmap/dsc` */
 #if LV_VERSION_CHECK(8, 2, 0) || LVGL_VERSION_MAJOR >= 9
-    .fallback = &lv_font_simsun_16_cjk,
+    .fallback = &ui_font_misans_16,
 #endif
     .user_data = NULL,
 };

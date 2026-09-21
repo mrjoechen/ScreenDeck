@@ -11,6 +11,7 @@ idf_component_register(
         esp_lcd_st7701
         esp_lcd_panel_io_additions
         esp_lcd_touch_gt911
+        espressif__esp_new_jpeg
         lvgl
         esp_http_client
         mbedtls)

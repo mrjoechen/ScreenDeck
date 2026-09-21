@@ -10,6 +10,7 @@ const serialCheck = document.querySelector("#serialCheck");
 const languageToggle = document.querySelector("#languageToggle");
 const languageToggleLabel = document.querySelector("#languageToggleLabel");
 const githubLink = document.querySelector("#githubLink");
+const refreshButton = document.querySelector("#refreshDevices");
 const descriptionMeta = document.querySelector('meta[name="description"]');
 
 const translations = {
@@ -52,13 +53,23 @@ const translations = {
     channelDevelopment: "开发版",
     chooseDevice: "选择设备",
     registryLoading: "读取型号清单…",
-    deviceListAria: "支持的设备型号",
+    noDevicesFound: "暂未发现可用设备",
+    refreshDevices: "刷新设备",
+    refreshDevicesAria: "刷新已连接的串口设备",
+    scanningDevices: "正在查找设备…",
+    devicesAvailable: "{count} 台可用设备",
+    modelSupported: "已支持",
+    modelUnsupported: "不支持",
+    unknownSerialDevice: "串口设备",
+    deviceListAria: "已连接的设备",
     confirmPrefix: "我已核对屏幕背面型号为",
     confirmSuffix: "，并知道全新安装可能清除设备中的内容与设置。",
     flashButton: "连接设备并刷入",
     unsupportedMessage: "当前浏览器不支持 Web Serial。请改用桌面版 Chrome、Edge 或支持该能力的 Firefox。",
     notAllowedMessage: "浏览器只允许在 HTTPS 或 localhost 页面刷写设备。GitHub Pages 部署后会自动满足 HTTPS 条件。",
-    helperSelect: "先选择已支持的型号，并完成上方确认。",
+    helperSelect: "先选择已支持的设备，并完成上方确认。",
+    helperNoDevice: "连接设备后，点击刷新设备。首次授权时浏览器会弹出串口选择窗口。",
+    helperUnsupportedOnly: "已发现设备，但当前固件不支持该型号。",
     bootHelpTitle: "浏览器没有找到串口？",
     bootHelpCable: "换用可传输数据的 USB 线，并关闭正在占用串口的监视器。若设备未自动进入下载模式，按住 BOOT，再点击刷入；开始连接后可短按 RESET。",
     bootHelpBrowser: "Safari、iOS 与多数移动浏览器不提供 Web Serial；请在桌面浏览器完成刷写。",
@@ -120,11 +131,8 @@ const translations = {
     helperReady: "已就绪。点击按钮后，在浏览器窗口中选择设备串口。",
     manifestFileError: "无法从 file:// 读取固件。请用本地 HTTP 服务打开本页，不要直接双击 index.html。",
     manifestUnavailable: "该型号的 Factory 镜像尚未就绪。请先完成构建与发布。",
-    modelsAvailable: "{count} 个可用型号",
     registryFailed: "型号清单读取失败",
     helperRegistryFailed: "无法读取设备型号清单。请刷新页面，或检查站点资源是否完整。",
-    moreDevices: "更多设备",
-    moreDevicesSummary: "适配完成后会作为独立型号加入",
   },
   en: {
     documentTitle: "ScreenDeck · Flash firmware in your browser",
@@ -165,13 +173,24 @@ const translations = {
     channelDevelopment: "Development",
     chooseDevice: "Choose a device",
     registryLoading: "Loading device registry…",
-    deviceListAria: "Supported device models",
+    noDevicesFound: "No available devices found yet",
+    refreshDevices: "Refresh devices",
+    refreshDevicesAria: "Refresh connected serial devices",
+    scanningDevices: "Looking for devices…",
+    deviceAvailableOne: "1 device available",
+    devicesAvailable: "{count} devices available",
+    modelSupported: "Supported",
+    modelUnsupported: "Not supported",
+    unknownSerialDevice: "Serial device",
+    deviceListAria: "Connected devices",
     confirmPrefix: "I verified that the model printed on the back is",
     confirmSuffix: ", and understand that a fresh install may erase content and settings on the device.",
     flashButton: "Connect and flash",
     unsupportedMessage: "This browser does not support Web Serial. Use desktop Chrome, Edge, or a Firefox build that provides it.",
     notAllowedMessage: "Browsers only allow device flashing on HTTPS or localhost. A GitHub Pages deployment meets the HTTPS requirement automatically.",
-    helperSelect: "Choose a supported model and complete the confirmation above.",
+    helperSelect: "Select a supported device and complete the confirmation above.",
+    helperNoDevice: "Connect the board over USB, then refresh devices. The browser will ask for serial permission the first time.",
+    helperUnsupportedOnly: "A device was found, but this firmware does not support that model.",
     bootHelpTitle: "Browser cannot find the serial port?",
     bootHelpCable: "Use a USB cable that supports data and close any serial monitor using the port. If the board does not enter download mode automatically, hold BOOT and click flash; briefly press RESET after connection begins.",
     bootHelpBrowser: "Safari, iOS, and most mobile browsers do not provide Web Serial. Complete the flash from a desktop browser.",
@@ -233,11 +252,8 @@ const translations = {
     helperReady: "Ready. Click the button, then choose the device serial port in the browser window.",
     manifestFileError: "Firmware cannot be loaded from file://. Serve this folder over HTTP instead of opening index.html directly.",
     manifestUnavailable: "The Factory image for this model is not ready. Complete the build and release first.",
-    modelsAvailable: "{count} model available",
     registryFailed: "Device registry failed to load",
     helperRegistryFailed: "The device registry could not be loaded. Refresh the page or check that all site assets are present.",
-    moreDevices: "More devices",
-    moreDevicesSummary: "Each adapted board will appear as a separate model",
   },
 };
 
@@ -246,10 +262,29 @@ const compatibility = {
   serial: "serial" in navigator,
 };
 
+const USB_FLASH_ADAPTERS = [
+  { vendorId: 0x303a, productId: 0x1001, name: "ESP32 USB JTAG/serial" },
+  { vendorId: 0x303a, productId: 0x1002, name: "Espressif USB CDC" },
+  { vendorId: 0x303a, name: "Espressif USB" },
+  { vendorId: 0x10c4, productId: 0xea60, name: "CP210x USB to UART" },
+  { vendorId: 0x10c4, productId: 0xea70, name: "CP2105 USB to UART" },
+  { vendorId: 0x1a86, productId: 0x7523, name: "CH340 USB Serial" },
+  { vendorId: 0x1a86, productId: 0x55d3, name: "CH343 USB Serial" },
+  { vendorId: 0x1a86, productId: 0x55d4, name: "CH9102 USB Serial" },
+  { vendorId: 0x0403, productId: 0x6001, name: "FT232 USB Serial" },
+  { vendorId: 0x0403, productId: 0x6010, name: "FT2232 USB Serial" },
+  { vendorId: 0x0403, productId: 0x6015, name: "FT231X USB Serial" },
+  { vendorId: 0x067b, productId: 0x2303, name: "PL2303 USB Serial" },
+];
+
 let currentLanguage = loadLanguage();
 let selectedDevice = null;
+let selectedPort = null;
 let availableDevices = [];
+let connectedPorts = [];
 let registryStatus = "loading";
+let portScanStatus = "idle";
+let scanningPorts = false;
 let manifestReady = false;
 let manifestRequest = null;
 let manifestErrorKey = "";
@@ -308,17 +343,35 @@ function updateCompatibility() {
   );
 }
 
+function connectedCountLabel() {
+  const count = connectedPorts.length;
+  if (count === 0) return t("noDevicesFound");
+  if (currentLanguage === "en" && count === 1) return t("deviceAvailableOne");
+  return t("devicesAvailable", { count });
+}
+
+function updateRefreshButton() {
+  if (!refreshButton) return;
+  const enabled = compatibility.secure && compatibility.serial && !scanningPorts;
+  refreshButton.disabled = !enabled;
+  refreshButton.setAttribute("aria-busy", String(scanningPorts));
+}
+
 function updateRegistryState() {
-  if (registryStatus === "ready") {
-    registryState.textContent = t("modelsAvailable", { count: availableDevices.length });
-    registryState.dataset.state = "ready";
-  } else if (registryStatus === "error") {
+  if (registryStatus === "error") {
     registryState.textContent = t("registryFailed");
     registryState.dataset.state = "error";
-  } else {
-    registryState.textContent = t("registryLoading");
+  } else if (portScanStatus === "scanning") {
+    registryState.textContent = t("scanningDevices");
     registryState.removeAttribute("data-state");
+  } else if (connectedPorts.length === 0) {
+    registryState.textContent = t("noDevicesFound");
+    registryState.dataset.state = "empty";
+  } else {
+    registryState.textContent = connectedCountLabel();
+    registryState.dataset.state = "ready";
   }
+  updateRefreshButton();
 }
 
 function updateInstallState() {
@@ -340,8 +393,11 @@ function updateInstallState() {
     setHelper("helperSerial", "error");
   } else if (registryStatus === "error") {
     setHelper("helperRegistryFailed", "error");
+  } else if (connectedPorts.length === 0) {
+    setHelper("helperNoDevice");
   } else if (!selectedDevice) {
-    setHelper("helperSelect");
+    const hasSupported = currentPortEntries().some((entry) => entry.supported);
+    setHelper(hasSupported ? "helperSelect" : "helperUnsupportedOnly", hasSupported ? "idle" : "error");
   } else if (manifestErrorKey) {
     setHelper(manifestErrorKey, "error");
   } else if (!manifestReady) {
@@ -353,61 +409,142 @@ function updateInstallState() {
   }
 }
 
-function createDeviceOption(device) {
+function hexId(value) {
+  return value.toString(16).toUpperCase().padStart(4, "0");
+}
+
+function usbIdentity(info) {
+  const vendorId = info.usbVendorId;
+  const productId = info.usbProductId;
+  if (!Number.isInteger(vendorId)) return null;
+  const exact = USB_FLASH_ADAPTERS.find(
+    (item) => item.vendorId === vendorId && item.productId === productId,
+  );
+  if (exact) return exact;
+  return USB_FLASH_ADAPTERS.find(
+    (item) => item.vendorId === vendorId && item.productId == null,
+  ) ?? null;
+}
+
+function usbIdLabel(info) {
+  const parts = [info.usbVendorId, info.usbProductId].filter((value) => Number.isInteger(value));
+  return parts.map(hexId).join(":");
+}
+
+function pickCatalogDevice() {
+  return (
+    availableDevices.find((device) => device.chipFamily === "ESP32-S3") ||
+    availableDevices[0] ||
+    null
+  );
+}
+
+function isPortConnected(port) {
+  return port.connected !== false;
+}
+
+function currentPortEntries() {
+  const catalogDevice = pickCatalogDevice();
+  return connectedPorts.map((port, index) => {
+    const info = port.getInfo?.() ?? {};
+    const usb = usbIdentity(info);
+    const ids = usbIdLabel(info);
+    const supported = Boolean(usb && catalogDevice);
+    return {
+      id: `port-${index}`,
+      port,
+      info,
+      usb,
+      supported,
+      catalogDevice: supported ? catalogDevice : null,
+      name: usb?.name || (ids ? `USB ${ids}` : t("unknownSerialDevice")),
+      summary: supported
+        ? [catalogDevice.name, ids].filter(Boolean).join(" · ")
+        : [t("modelUnsupported"), ids].filter(Boolean).join(" · "),
+    };
+  });
+}
+
+function createEmptyState() {
+  const empty = document.createElement("div");
+  empty.className = "device-picker__empty";
+  empty.textContent = t("noDevicesFound");
+  return empty;
+}
+
+function createLoadingState() {
+  const loading = document.createElement("div");
+  loading.className = "device-picker__loading";
+  loading.setAttribute("aria-hidden", "true");
+  return loading;
+}
+
+function createDeviceOption(entry) {
   const label = document.createElement("label");
-  label.className = "device-option";
+  label.className = entry.supported ? "device-option" : "device-option device-option--unsupported";
 
   const input = document.createElement("input");
   input.type = "radio";
   input.name = "device";
-  input.value = device.id;
-  input.checked = selectedDevice?.id === device.id;
-  input.setAttribute("aria-label", `${device.vendor} ${device.name}`);
+  input.value = entry.id;
+  input.checked = selectedPort === entry.port;
+  input.disabled = !entry.supported;
+  input.setAttribute(
+    "aria-label",
+    `${entry.name}. ${entry.supported ? t("modelSupported") : t("modelUnsupported")}`,
+  );
 
   const copy = document.createElement("span");
   copy.className = "device-option__copy";
 
   const name = document.createElement("strong");
-  name.textContent = device.name;
+  name.textContent = entry.name;
 
   const summary = document.createElement("span");
-  summary.textContent = `${device.vendor} · ${device.summary}`;
+  summary.textContent = entry.summary;
+
+  const status = document.createElement("span");
+  status.className = `device-option__status device-option__status--${entry.supported ? "supported" : "unsupported"}`;
+  status.textContent = entry.supported ? t("modelSupported") : t("modelUnsupported");
 
   copy.append(name, summary);
-  label.append(input, copy);
+  label.append(input, copy, status);
 
-  input.addEventListener("change", () => selectDevice(device));
+  if (entry.supported) {
+    input.addEventListener("change", () => selectPort(entry));
+  }
   return label;
 }
 
-function createComingSoonOption() {
-  const label = document.createElement("div");
-  label.className = "device-option device-option--coming";
-  label.setAttribute("aria-disabled", "true");
-
-  const spacer = document.createElement("span");
-  spacer.setAttribute("aria-hidden", "true");
-
-  const copy = document.createElement("span");
-  copy.className = "device-option__copy";
-
-  const name = document.createElement("strong");
-  name.textContent = t("moreDevices");
-
-  const summary = document.createElement("span");
-  summary.textContent = t("moreDevicesSummary");
-
-  copy.append(name, summary);
-  label.append(spacer, copy);
-  return label;
+function pruneSelection() {
+  if (selectedPort && connectedPorts.includes(selectedPort)) return;
+  selectedPort = null;
+  selectedDevice = null;
+  confirmInput.checked = false;
+  confirmInput.disabled = true;
+  confirmedModel.textContent = pickCatalogDevice()?.name ?? "ESP32-S3-4848S040";
+  manifestReady = false;
+  manifestErrorKey = "";
+  installer.removeAttribute("manifest");
 }
 
 function renderDeviceList() {
-  if (registryStatus !== "ready") return;
-  deviceList.replaceChildren(
-    ...availableDevices.map(createDeviceOption),
-    createComingSoonOption(),
-  );
+  if (portScanStatus === "scanning" && connectedPorts.length === 0) {
+    deviceList.removeAttribute("role");
+    deviceList.replaceChildren(createLoadingState());
+    return;
+  }
+
+  pruneSelection();
+  const entries = currentPortEntries();
+  if (entries.length === 0) {
+    deviceList.removeAttribute("role");
+    deviceList.replaceChildren(createEmptyState());
+    return;
+  }
+
+  deviceList.setAttribute("role", "radiogroup");
+  deviceList.replaceChildren(...entries.map(createDeviceOption));
 }
 
 function applyLanguage(language) {
@@ -557,12 +694,70 @@ async function verifyManifest(device) {
   }
 }
 
-function selectDevice(device) {
-  selectedDevice = device;
+function selectPort(entry) {
+  if (!entry.supported || !entry.catalogDevice) return;
+  selectedPort = entry.port;
+  selectedDevice = entry.catalogDevice;
   confirmInput.checked = false;
   confirmInput.disabled = false;
-  confirmedModel.textContent = device.name;
-  verifyManifest(device);
+  confirmedModel.textContent = entry.catalogDevice.name;
+  verifyManifest(entry.catalogDevice);
+}
+
+async function collectGrantedPorts() {
+  if (!navigator.serial?.getPorts) return [];
+  try {
+    const ports = await navigator.serial.getPorts();
+    return ports.filter(isPortConnected);
+  } catch {
+    return [];
+  }
+}
+
+function mergePorts(ports, extra) {
+  const merged = [...ports];
+  for (const port of extra) {
+    if (port && !merged.includes(port)) merged.push(port);
+  }
+  return merged;
+}
+
+async function refreshDevices({ prompt = false } = {}) {
+  if (scanningPorts) return;
+  scanningPorts = true;
+  portScanStatus = "scanning";
+  updateRegistryState();
+  renderDeviceList();
+
+  try {
+    let ports = await collectGrantedPorts();
+    if (
+      prompt &&
+      ports.length === 0 &&
+      compatibility.secure &&
+      compatibility.serial &&
+      navigator.serial?.requestPort
+    ) {
+      try {
+        const port = await navigator.serial.requestPort();
+        ports = mergePorts(ports, [port]);
+      } catch {
+        // The user cancelled the browser serial picker, or no port was chosen.
+      }
+    }
+
+    connectedPorts = ports.filter(isPortConnected);
+    portScanStatus = "ready";
+    renderDeviceList();
+  } catch {
+    connectedPorts = [];
+    portScanStatus = "ready";
+    renderDeviceList();
+  } finally {
+    scanningPorts = false;
+    updateRegistryState();
+    updateInstallState();
+  }
 }
 
 async function loadRegistry() {
@@ -578,23 +773,43 @@ async function loadRegistry() {
 
     availableDevices = registry.devices;
     registryStatus = "ready";
-    renderDeviceList();
-    updateRegistryState();
   } catch {
     availableDevices = [];
     registryStatus = "error";
-    deviceList.replaceChildren();
+  }
+
+  renderDeviceList();
+  updateRegistryState();
+  updateInstallState();
+}
+
+function watchSerialHotplug() {
+  if (!navigator.serial?.addEventListener) return;
+  navigator.serial.addEventListener("connect", (event) => {
+    if (portScanStatus === "idle" || scanningPorts) return;
+    connectedPorts = mergePorts(connectedPorts, [event.target]);
+    renderDeviceList();
     updateRegistryState();
     updateInstallState();
-  }
+  });
+  navigator.serial.addEventListener("disconnect", (event) => {
+    connectedPorts = connectedPorts.filter((port) => port !== event.target);
+    renderDeviceList();
+    updateRegistryState();
+    updateInstallState();
+  });
 }
 
 languageToggle.addEventListener("click", () => {
   applyLanguage(currentLanguage === "zh" ? "en" : "zh");
 });
 confirmInput.addEventListener("change", updateInstallState);
+refreshButton?.addEventListener("click", () => {
+  void refreshDevices({ prompt: true });
+});
 
 resolveGithubLink();
 applyLanguage(currentLanguage);
+watchSerialHotplug();
 loadReleaseInfo();
 loadRegistry();

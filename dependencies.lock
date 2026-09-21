@@ -625,6 +625,7 @@ direct_dependencies:
 - espressif/esp_lv_fs
 - espressif/esp_lvgl_adapter
 - espressif/esp_modem
+- espressif/esp_new_jpeg
 - espressif/esp_rainmaker
 - espressif/freetype
 - espressif/knob
@@ -636,6 +637,6 @@ direct_dependencies:
 - idf
 - joltwallet/littlefs
 - lvgl/lvgl
-manifest_hash: b5725e758bd73eff39d7f7e76a6768f6d9e9f260201ee6eba6590824c0c4d1e2
+manifest_hash: af4868689dbb1493476a15073aaffc7b6608a56c565008a017e5156c4b61f88b
 target: esp32s3
 version: 2.0.0

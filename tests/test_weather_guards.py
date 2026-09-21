@@ -8,6 +8,9 @@ ROOT = Path(__file__).resolve().parents[1]
 CONFIG_HEADER = (ROOT / "include" / "app_config.h").read_text()
 CONFIG_SOURCE = (ROOT / "src" / "app_config.cpp").read_text()
 DISPLAY_SOURCE = (ROOT / "src" / "display_ui.cpp").read_text()
+OVERLAY_PRESENTATION_HEADER = (
+    ROOT / "include" / "playback_overlay_presentation.h"
+).read_text()
 WEATHER_SOURCE = (ROOT / "src" / "weather.cpp").read_text()
 WEATHER_ICONS = (ROOT / "src" / "weather_icons.c").read_text()
 WEB_SOURCE = (ROOT / "src" / "web_portal.cpp").read_text()
@@ -91,15 +94,30 @@ class WeatherGuards(unittest.TestCase):
     def test_weather_overlay_shares_the_playback_card_on_image_pages(self) -> None:
         overlay = function_body(DISPLAY_SOURCE, "void addPlaybackClock(")
         self.assertIn("onImage && appConfig.showWeather() && weatherGetSnapshot(snapshot)", overlay)
-        self.assertIn("showClock && !showWeather", overlay)
-        self.assertIn("lv_obj_set_size(card, 184, 104)", overlay)
+        self.assertIn(
+            "presentation.showClock && !presentation.showWeather", overlay
+        )
+        self.assertIn(
+            "lv_obj_set_size(card, presentation.width, presentation.height)",
+            overlay,
+        )
+        for size in (
+            "presentation.width = 184",
+            "presentation.width = 220",
+            "presentation.width = 72",
+        ):
+            self.assertIn(size, OVERLAY_PRESENTATION_HEADER)
         self.assertIn("LV_ALIGN_TOP_MID", overlay)
         self.assertIn("LV_FLEX_FLOW_ROW", overlay)
         self.assertIn("LV_ALIGN_CENTER", overlay)
+        self.assertIn(
+            "addPlaybackWeatherCluster(weatherCol, weatherAvailable, snapshot, textColor)",
+            overlay,
+        )
         self.assertIn("addPlaybackWeatherCluster", overlay)
         self.assertIn("alignPlaybackClockCard(card)", overlay)
         weather = function_body(DISPLAY_SOURCE, "void addPlaybackWeatherCluster(")
-        self.assertIn("&lv_font_montserrat_16", weather)
+        self.assertIn("&ui_font_misans_16", weather)
         self.assertIn(r'\xC2\xB0', weather)
         self.assertNotIn("addPlaybackLocation", weather)
         self.assertNotIn("void addPlaybackLocation(", DISPLAY_SOURCE)
@@ -126,7 +144,8 @@ class WeatherGuards(unittest.TestCase):
         )
         self.assertIn("containsCjk(text)", add_label)
         self.assertNotIn("containsUtf8(text)", add_label)
-        self.assertNotIn('U+00B0 "°"', (ROOT / "src" / "ui_font_16_zh.c").read_text())
+        weather = function_body(DISPLAY_SOURCE, "void addPlaybackWeatherCluster(")
+        self.assertEqual(weather.count("&ui_font_misans_16"), 2)
 
 
 if __name__ == "__main__":
